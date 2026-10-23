@@ -1,0 +1,44 @@
+{{define "body"}}
+<h1>Connections</h1>
+<p class="sub">The systems your own agents reach as you, {{.Member}}. Nobody else's agent uses your connections, and a change asks you first unless you allow changes for that system.</p>
+{{if not .Systems}}<div class="card">Your organization has not enabled any system yet.{{if .Admin}} Add one on the Connectors page.{{end}}</div>{{end}}
+{{range .Systems}}
+<div class="card{{if .Highlight}} hl{{end}}" id="{{.Name}}">
+  <div class="row">
+    <div>
+      <strong>{{.DisplayName}}</strong> {{if .Connected}}<span class="pill ok">connected</span>{{else}}<span class="pill">not connected</span>{{end}}
+      <div class="muted">{{.Purpose}}</div>
+      <div class="muted">{{range $i, $h := .Hosts}}{{if $i}}, {{end}}{{$h}}{{end}}</div>
+      {{if .Connected}}<div class="muted">Changes: {{if eq .Changes "allowed"}}made without asking{{else}}each one asks you first{{end}}</div>{{end}}
+    </div>
+    <div>
+    {{if .Connected}}
+      {{if eq .Changes "allowed"}}
+      <form method="post" action="{{$.Base}}reach"><input type="hidden" name="system" value="{{.Name}}"><input type="hidden" name="reach" value="read"><button>Ask me for changes</button></form>
+      {{else}}
+      <form method="post" action="{{$.Base}}reach"><input type="hidden" name="system" value="{{.Name}}"><input type="hidden" name="reach" value="write"><button>Allow changes</button></form>
+      {{end}}
+      <form method="post" action="{{$.Base}}disconnect"><input type="hidden" name="system" value="{{.Name}}"><button class="danger">Disconnect</button></form>
+    {{else if eq .Kind "apiKey"}}
+    {{else}}
+      <form method="post" action="{{$.Base}}connect"><input type="hidden" name="system" value="{{.Name}}"><input type="hidden" name="reach" value="read"><button class="primary">Connect</button></form>
+    {{end}}
+    </div>
+  </div>
+  {{if and (not .Connected) (eq .Kind "apiKey")}}
+  <form class="block" method="post" action="{{$.Base}}connect">
+    <input type="hidden" name="system" value="{{.Name}}"><input type="hidden" name="reach" value="read">
+    <label for="key-{{.Name}}">Key{{if .Help}} ({{.Help}}){{end}}</label>
+    <input id="key-{{.Name}}" type="password" name="key" autocomplete="off" required>
+    <p><button class="primary">Connect</button></p>
+  </form>
+  {{else if and (not .Connected) .Help}}<div class="muted">{{.Help}}</div>{{end}}
+</div>
+{{end}}
+{{if .Activity}}
+<h2>Recent calls</h2>
+<table><tr><th>When (UTC)</th><th>System</th><th>Request</th><th>Result</th></tr>
+{{range .Activity}}<tr><td>{{.When}}</td><td>{{.Connector}}</td><td>{{.Method}} {{.Path}}</td><td>{{if .Status}}{{.Status}} {{end}}{{.Outcome}}</td></tr>{{end}}
+</table>
+{{end}}
+{{end}}

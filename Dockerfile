@@ -1,0 +1,13 @@
+FROM golang:1.24 AS build
+WORKDIR /src
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . .
+ARG VERSION=dev
+RUN CGO_ENABLED=0 go build -trimpath -ldflags "-s -w -X main.version=${VERSION}" -o /bnbloc-connections .
+
+FROM gcr.io/distroless/static-debian12
+COPY --from=build /bnbloc-connections /bnbloc-connections
+EXPOSE 8098
+USER nonroot
+ENTRYPOINT ["/bnbloc-connections"]

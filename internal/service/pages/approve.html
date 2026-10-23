@@ -1,0 +1,19 @@
+{{define "body"}}
+<h1>{{.Heading}}</h1>
+{{if .Held}}
+<p class="sub">Your agent asked for this change in {{.System}}. Nothing is made until you allow it.</p>
+<div class="card"><strong>{{.Held.Request.Method}} {{.Path}}</strong>
+{{if .Body}}<pre>{{.Body}}</pre>{{end}}
+<div class="muted">Asked {{.Asked}} in room {{.Held.Room}}.</div></div>
+<form class="block" method="post" action="{{.Base}}decide">
+  <input type="hidden" name="id" value="{{.Held.ID}}">
+  <label><input type="checkbox" name="always" value="1"> Allow changes in {{.System}} without asking from now on</label>
+  <p><button class="primary" name="decision" value="allow">Allow</button> <button name="decision" value="deny">Don't allow</button></p>
+</form>
+{{else if .Result}}
+<div class="card"><div class="muted">{{.System}} answered {{.Result.Status}}.</div>{{if .ResultBody}}<pre>{{.ResultBody}}</pre>{{end}}</div>
+<p class="muted">Ask your agent to continue; it sees the change in {{.System}}.</p>
+{{else}}
+<div class="card">This change is no longer waiting: it was decided, or it expired after a day.</div>
+{{end}}
+{{end}}
