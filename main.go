@@ -58,8 +58,13 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("AWS Secrets Manager: %w", err)
 	}
-	if len(set) > 0 {
+	switch {
+	case len(set) > 0:
 		slog.Info("bnbloc-connections: environment from AWS Secrets Manager", "secret", os.Getenv(secretenv.SecretIDEnv), "set", strings.Join(set, ","))
+	case strings.TrimSpace(os.Getenv(secretenv.SecretIDEnv)) == "":
+		slog.Info("bnbloc-connections: " + secretenv.SecretIDEnv + " is not set: the bootstrap comes from the environment only")
+	default:
+		slog.Info("bnbloc-connections: AWS Secrets Manager set nothing (every key it holds is set in the environment already, or none is this process's)", "secret", os.Getenv(secretenv.SecretIDEnv))
 	}
 	listen := envOr(envListen, ":8098")
 	gateway := strings.TrimSpace(os.Getenv(envGateway))
