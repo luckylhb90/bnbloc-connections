@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/luckylhb90/bnbloc-connections/internal/platform"
+	"github.com/luckylhb90/bnbloc-connections/internal/secretenv"
 	"github.com/luckylhb90/bnbloc-connections/internal/service"
 )
 
@@ -50,6 +51,16 @@ func main() {
 }
 
 func run() error {
+	// A deployment that keeps the bootstrap in AWS Secrets Manager names the
+	// secret (secretenv.SecretIDEnv); it fills what the environment leaves
+	// empty before anything reads it.
+	set, err := secretenv.Load(envSecret)
+	if err != nil {
+		return fmt.Errorf("AWS Secrets Manager: %w", err)
+	}
+	if len(set) > 0 {
+		slog.Info("bnbloc-connections: environment from AWS Secrets Manager", "secret", os.Getenv(secretenv.SecretIDEnv), "set", strings.Join(set, ","))
+	}
 	listen := envOr(envListen, ":8098")
 	gateway := strings.TrimSpace(os.Getenv(envGateway))
 	if gateway == "" {

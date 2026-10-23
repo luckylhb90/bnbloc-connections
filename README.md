@@ -146,6 +146,13 @@ they expire.
 Environment: `BNBLOC_CONNECTIONS_BNBLOC_URL` (the gateway as this process
 reaches it, required), `BNBLOC_CONNECTIONS_SECRET` (the credential the
 install showed once), `BNBLOC_CONNECTIONS_LISTEN` (default `:8098`).
+The bootstrap may come from AWS Secrets Manager instead: set
+`BNBLOC_AWS_SECRET_ID` (and `BNBLOC_AWS_REGION` when the default chain has
+none) and give the process read access to that secret (on EKS, the pod's
+IAM role: `secretsmanager:GetSecretValue`). Its value is a JSON object of
+environment names to values (`{"BNBLOC_CONNECTIONS_SECRET": "whsec_…"}`),
+or the credential alone; a variable set in the environment wins.
+
 Health: `GET /healthz` answers `200 {"ok":true}` (unsigned, no data): the
 liveness and readiness probe. `GET /discover` is open too (the install
 probe).
