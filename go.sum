@@ -28,5 +28,5 @@ github.com/aws/aws-sdk-go-v2/service/sts v1.51.1 h1:0HOqZXRvMytH6bFHVIc0oJX07sZj
 github.com/aws/aws-sdk-go-v2/service/sts v1.51.1/go.mod h1:26zA0GhDrLo+yiLI2yXWxqB1PdsShfLikoI7GOEgugM=
 github.com/aws/smithy-go v1.28.1 h1:R/nXH00c8qcfCzQVELtRw+eLQWtzv+VAIEFJ1/xxXlQ=
 github.com/aws/smithy-go v1.28.1/go.mod h1:YE2RhdIuDbA5E5bTdciG9KrW3+TiEONeUWCqxX9i1Fc=
-github.com/luckylhb90/bnbloc v0.1.1-0.20261023031731-0425ccc0a913 h1:8IlroF9FeHuPH0vLFivUGegMzPorptYWblCbgjOCVUE=
-github.com/luckylhb90/bnbloc v0.1.1-0.20261023031731-0425ccc0a913/go.mod h1:B2OrRTYPq/+ipaoiV3LthCyJfc5k7LaDB/kI/w952hY=
+github.com/luckylhb90/bnbloc v0.1.1-0.20261023062617-67d3162da757 h1:ZLjESHbAVY2sRnbUnsJmi6oqu9uPaBvj4I0HOlN/1l0=
+github.com/luckylhb90/bnbloc v0.1.1-0.20261023062617-67d3162da757/go.mod h1:B2OrRTYPq/+ipaoiV3LthCyJfc5k7LaDB/kI/w952hY=

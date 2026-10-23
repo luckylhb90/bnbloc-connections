@@ -519,3 +519,62 @@ func TestProviderConnectAndAuthorize(t *testing.T) {
 		t.Fatalf("admin refusal = %d %s", out.Status, out.Body)
 	}
 }
+
+// A connector whose requests go out from the member's computer: the
+// component sends nothing itself; it answers Send with the member's
+// credentials for the request, accepts a reported answer (recording it),
+// sends once more after a refused one, and asks to connect again after a
+// second. A held change, allowed on its page, goes through at the agent's
+// next send of it.
+func TestSendFromTheMembersComputer(t *testing.T) {
+	fx := newFixture(t)
+	c := issues()
+	c.SendFrom = connector.SendMember
+	fx.addConnector(c)
+	_ = fx.svc.saveGrant(context.Background(), "maya", "home", Grant{Connector: "issues", Reach: connector.Read, APIKey: "KEY-9"})
+	egress := func(in component.EgressRequest) component.EgressResponse {
+		t.Helper()
+		raw, _ := json.Marshal(in)
+		rec := fx.do(http.MethodPost, component.ServiceEgressRequestPath, component.TurnHeader, turn(component.DriveOwn), raw)
+		var out component.EgressResponse
+		_ = json.Unmarshal(rec.Body.Bytes(), &out)
+		return out
+	}
+	read := component.EgressRequest{Method: "GET", URL: "https://example.com/api/issue/1", Header: map[string][]string{"Authorization": {"Bearer agent"}}}
+	out := egress(read)
+	if out.Send == nil || out.Send.Header["Authorization"][0] != "Bearer KEY-9" || out.Send.Remove[0] != "Authorization" || fx.count() != 0 {
+		t.Fatalf("send = %+v (calls %d)", out, fx.count())
+	}
+	read.Report = &component.EgressReport{Attempt: 1, Status: 200, Body: []byte("{}")}
+	if out := egress(read); !out.Accept {
+		t.Fatalf("report = %+v", out)
+	}
+	read.Report = &component.EgressReport{Attempt: 1, Status: 401}
+	if out := egress(read); out.Send == nil {
+		t.Fatalf("after a refusal = %+v (send again)", out)
+	}
+	read.Report = &component.EgressReport{Attempt: 2, Status: 401}
+	if out := egress(read); out.Status != http.StatusForbidden || out.Card == nil {
+		t.Fatalf("refused twice = %+v", out)
+	}
+	write := component.EgressRequest{Method: "POST", URL: "https://example.com/api/issue", Body: []byte(`{"t":1}`)}
+	out = egress(write)
+	if out.Status != http.StatusAccepted {
+		t.Fatalf("change = %+v", out)
+	}
+	q, _ := url.ParseQuery(out.Card.Actions[0].Query)
+	if rec := fx.page(false, http.MethodPost, "/pages/approve/decide", url.Values{"id": {q.Get("id")}, "decision": {"allow"}}); rec.Code != 200 || !strings.Contains(rec.Body.String(), "Allowed") || fx.count() != 0 {
+		t.Fatalf("allow = %d %s (sent %d)", rec.Code, rec.Body, fx.count())
+	}
+	if out := egress(write); out.Send == nil {
+		t.Fatalf("the allowed change = %+v, want sent", out)
+	}
+	if out := egress(write); out.Status != http.StatusAccepted {
+		t.Fatalf("an allowance is spent once: %+v", out)
+	}
+	var calls []Call
+	_ = json.Unmarshal(fx.store.get("members/maya/activity:home"), &calls)
+	if len(calls) == 0 || calls[0].Status != 200 || calls[0].Outcome != "read" {
+		t.Fatalf("activity = %+v", calls)
+	}
+}

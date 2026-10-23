@@ -90,6 +90,14 @@ and reviews the drafts agents post there.
   regular expression), then write rules; anything else is refused. A path
   glob has `*` (one segment) and `**` (any).
 - `expiredWhen`: how the system says a sign-in ended when that is not a 401.
+- `sendFrom`: where requests go out. `server` (default): from this
+  component's network. `member`: from each member's computer, through their
+  bridge (a system the component's network does not reach, an internal one
+  the members' computers do): the component checks the policy and gives the
+  bridge the member's credentials for that one request (never the agent),
+  the bridge sends it and reports the answer, which is recorded and audited
+  the same way; an allowed change goes through at the agent's next send of
+  it. The admin page switches it per connector.
 - `cliEnv`: placeholders a CLI needs before it runs (every credential sent
   to a connector host is replaced).
 

@@ -299,6 +299,18 @@ func (s *Service) approvePage(w http.ResponseWriter, r *http.Request, m componen
 			slog.Warn("connections: reach not saved", "error", err)
 		}
 	}
+	if c.FromMember() {
+		// The system is reached from the member's computer: the change is
+		// made by the agent's next send of it, through the member's bridge.
+		if err := s.allow(ctx, m.Subject, h); err != nil {
+			s.callbackPage(w, http.StatusOK, "Not allowed", "The change could not be allowed right now: "+err.Error())
+			return
+		}
+		s.record(ctx, t, c, h.Request.Method, u.Path, 0, "allowed")
+		audit(w, component.Audit{Action: "change", Target: c.Name + " " + h.Request.Method + " " + u.Path, Outcome: "allow", Detail: "sent from the member's computer"})
+		s.callbackPage(w, http.StatusOK, "Allowed", "Ask your agent again: its next try of this change goes through, from your computer (within an hour).")
+		return
+	}
 	resp, err := s.call(ctx, c, m.Org, m.Subject, &g, h.Request, u)
 	if err != nil {
 		s.record(ctx, t, c, h.Request.Method, u.Path, 0, "failed")
@@ -357,6 +369,28 @@ func (s *Service) adminPage(w http.ResponseWriter, r *http.Request, m component.
 		}
 		audit(w, component.Audit{Action: "connector-save", Target: c.Name, Outcome: "ok"})
 		back(w, m, c.DisplayName+" saved.", false)
+		return
+	case "sendfrom":
+		name := form.Get("name")
+		var c connector.Connector
+		if found, err := s.P.GetJSON(ctx, org, connectorPrefix+name, &c); err != nil || !found {
+			back(w, m, "No such connector.", true)
+			return
+		}
+		c.SendFrom = connector.SendServer
+		if form.Get("sendFrom") == connector.SendMember {
+			c.SendFrom = connector.SendMember
+		}
+		if err := s.saveConnector(ctx, m.Org, c); err != nil {
+			back(w, m, "Not saved: "+err.Error(), true)
+			return
+		}
+		audit(w, component.Audit{Action: "connector-send-from", Target: name, Outcome: "ok", Detail: c.SendFrom})
+		where := "this service"
+		if c.FromMember() {
+			where = "each member's computer"
+		}
+		back(w, m, c.DisplayName+": requests go out from "+where+".", false)
 		return
 	case "toggle", "delete":
 		name := form.Get("name")

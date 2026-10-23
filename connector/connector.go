@@ -40,10 +40,26 @@ type Connector struct {
 	ExpiredWhen []Expired         `json:"expiredWhen,omitempty"`
 	CLIEnv      map[string]string `json:"cliEnv,omitempty"`
 	Guide       string            `json:"guide,omitempty"`
+	// SendFrom is where a request to the system goes out: SendServer (this
+	// component's network, the default) or SendMember (the member's own
+	// computer, through their bridge: a system the component's network does
+	// not reach). Either way the credentials and the policy are this
+	// component's.
+	SendFrom string `json:"sendFrom,omitempty"`
 	// Enabled: the organization's members may connect it and their agents
 	// reach it.
 	Enabled bool `json:"enabled,omitempty"`
 }
+
+// Where requests go out (Connector.SendFrom).
+const (
+	SendServer = "server"
+	SendMember = "member"
+)
+
+// FromMember reports a connector whose requests go out from the member's
+// computer.
+func (c Connector) FromMember() bool { return c.SendFrom == SendMember }
 
 // Connect is how a member connects the system.
 type Connect struct {
@@ -161,6 +177,9 @@ func (c Connector) Validate() error {
 		if !component.ValidEgressHost(h) {
 			return fmt.Errorf("host %q: an exact lower-case DNS name (no port, no address, no wildcard)", h)
 		}
+	}
+	if c.SendFrom != "" && c.SendFrom != SendServer && c.SendFrom != SendMember {
+		return errors.New(`sendFrom: "server" (default) or "member"`)
 	}
 	if err := c.Connect.validate(); err != nil {
 		return fmt.Errorf("connect: %w", err)

@@ -14,8 +14,10 @@
 {{range .Connectors}}
 <div class="card"><div class="row"><div><strong>{{.C.DisplayName}}</strong> {{if .C.Enabled}}<span class="pill ok">enabled</span>{{else}}<span class="pill">disabled</span>{{end}}
 <div class="muted">{{.C.Name}} · {{.C.Connect.Kind}} · {{range $i, $h := .C.Hosts}}{{if $i}}, {{end}}{{$h}}{{end}}</div>
+<div class="muted">Requests go out from: {{if .C.FromMember}}each member's computer{{else}}this service{{end}}</div>
 <div class="muted">Client secret: {{if .HasClientSecret}}set{{else}}not set{{end}} · Provider secret: {{if .HasProviderSecret}}set{{else}}not set{{end}}</div></div>
 <div><form method="post" action="{{$.Base}}toggle"><input type="hidden" name="name" value="{{.C.Name}}">{{if .C.Enabled}}<button name="enabled" value="0">Disable</button>{{else}}<button class="primary" name="enabled" value="1">Enable</button>{{end}}</form>
+<form method="post" action="{{$.Base}}sendfrom"><input type="hidden" name="name" value="{{.C.Name}}">{{if .C.FromMember}}<button name="sendFrom" value="server">Send from this service</button>{{else}}<button name="sendFrom" value="member">Send from members' computers</button>{{end}}</form>
 <form method="post" action="{{$.Base}}delete"><input type="hidden" name="name" value="{{.C.Name}}"><button class="danger">Remove</button></form></div></div>
 <details><summary class="muted">Edit</summary>
 <form class="block" method="post" action="{{$.Base}}save"><textarea name="json" spellcheck="false">{{.JSON}}</textarea><p><button>Save</button></p></form>

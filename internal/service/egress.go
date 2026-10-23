@@ -97,7 +97,7 @@ func (s *Service) serve(ctx context.Context, t component.Turn, in component.Egre
 		return refusal(http.StatusForbidden, host+" is not a system your organization enabled", nil, nil), nil
 	}
 	target := in.Method + " " + u.Path
-	if !s.limiter.allow(t.Requester+"\n"+c.Name, s.now()) {
+	if in.Report == nil && !s.limiter.allow(t.Requester+"\n"+c.Name, s.now()) {
 		return refusal(http.StatusTooManyRequests, "too many requests to "+c.DisplayName+" for now; slow down", nil, nil),
 			&component.Audit{Action: "request", Target: c.Name + " " + target, Outcome: "deny", Detail: "rate"}
 	}
@@ -116,7 +116,7 @@ func (s *Service) serve(ctx context.Context, t component.Turn, in component.Egre
 		s.record(ctx, t, c, in.Method, u.Path, 0, "refused")
 		return refusal(http.StatusForbidden, in.Method+" "+u.Path+" is not a request the "+c.DisplayName+" connector allows", nil, nil),
 			&component.Audit{Action: "request", Target: c.Name + " " + target, Outcome: "deny", Detail: "policy"}
-	case class == connector.Write && g.Reach != connector.Write:
+	case class == connector.Write && g.Reach != connector.Write && in.Report == nil && !s.takeAllowance(ctx, t, c, in):
 		id, err := s.hold(ctx, t, c, in)
 		if err != nil {
 			return refusal(http.StatusBadGateway, "the change could not be held for "+t.Requester+": "+err.Error(), nil, nil), nil
@@ -126,26 +126,66 @@ func (s *Service) serve(ctx context.Context, t component.Turn, in component.Egre
 				heldCard(c, in, u, id), map[string]any{"status": "held", "id": id}),
 			&component.Audit{Action: "request", Target: c.Name + " " + target, Outcome: "queued", Detail: "held"}
 	}
+	if c.FromMember() {
+		return s.fromMember(ctx, t, c, &g, in, u, class)
+	}
 	resp, err := s.call(ctx, c, t.Org, t.Requester, &g, in, u)
+	if err != nil {
+		return s.failed(ctx, t, c, in, u, err)
+	}
+	s.record(ctx, t, c, in.Method, u.Path, resp.Status, class)
+	return resp, &component.Audit{Action: "request", Target: c.Name + " " + target, Outcome: "allow", Detail: class + fmt.Sprintf(" %d", resp.Status)}
+}
+
+// failed answers a request whose credentials or call failed: a dead
+// connection asks to connect again, an administrator's item says so,
+// anything else is the system's own error.
+func (s *Service) failed(ctx context.Context, t component.Turn, c connector.Connector, in component.EgressRequest, u *url.URL, err error) (component.EgressResponse, *component.Audit) {
+	target := in.Method + " " + u.Path
 	switch {
 	case errors.Is(err, errReconnect):
 		s.record(ctx, t, c, in.Method, u.Path, 0, "reconnect")
 		return refusal(http.StatusForbidden, "the connection to "+c.DisplayName+" no longer works: "+t.Requester+" was asked in the room to connect it again",
 				connectCard(c, in.Method, u.Path, true), map[string]any{"system": c.Name, "connected": false}),
 			&component.Audit{Action: "request", Target: c.Name + " " + target, Outcome: "deny", Detail: "reconnect"}
-	case err != nil:
-		var pe *providerError
-		if errors.As(err, &pe) && pe.admin {
-			return refusal(http.StatusForbidden, c.DisplayName+" is not available yet: "+pe.msg+" (an administrator arranges it; nothing for "+t.Requester+" to do)", nil, nil),
-				&component.Audit{Action: "request", Target: c.Name + " " + target, Outcome: "failed", Detail: "admin: " + pe.msg}
-		}
-		slog.Warn("connections: request failed", "connector", c.Name, "error", err)
-		s.record(ctx, t, c, in.Method, u.Path, 0, "failed")
-		return refusal(http.StatusBadGateway, c.DisplayName+" could not be reached: "+err.Error(), nil, nil),
-			&component.Audit{Action: "request", Target: c.Name + " " + target, Outcome: "failed"}
 	}
-	s.record(ctx, t, c, in.Method, u.Path, resp.Status, class)
-	return resp, &component.Audit{Action: "request", Target: c.Name + " " + target, Outcome: "allow", Detail: class + fmt.Sprintf(" %d", resp.Status)}
+	var pe *providerError
+	if errors.As(err, &pe) && pe.admin {
+		return refusal(http.StatusForbidden, c.DisplayName+" is not available yet: "+pe.msg+" (an administrator arranges it; nothing for "+t.Requester+" to do)", nil, nil),
+			&component.Audit{Action: "request", Target: c.Name + " " + target, Outcome: "failed", Detail: "admin: " + pe.msg}
+	}
+	slog.Warn("connections: request failed", "connector", c.Name, "error", err)
+	s.record(ctx, t, c, in.Method, u.Path, 0, "failed")
+	return refusal(http.StatusBadGateway, c.DisplayName+" could not be reached: "+err.Error(), nil, nil),
+		&component.Audit{Action: "request", Target: c.Name + " " + target, Outcome: "failed"}
+}
+
+// fromMember serves a connector whose requests go out from the member's
+// computer: the bridge is told to send the request itself with the
+// member's credentials for it (Send), and reports what the system answered.
+// A refused sign-in (401, expiredWhen) is sent once more with fresh
+// credentials; refused again, the member connects again. An accepted
+// answer is recorded and audited like a call made here.
+func (s *Service) fromMember(ctx context.Context, t component.Turn, c connector.Connector, g *Grant, in component.EgressRequest, u *url.URL, class string) (component.EgressResponse, *component.Audit) {
+	target := in.Method + " " + u.Path
+	force := false
+	if r := in.Report; r != nil {
+		refused := r.Status == http.StatusUnauthorized || c.IsExpired(r.Status, r.Location, r.Body)
+		if !refused {
+			s.record(ctx, t, c, in.Method, u.Path, r.Status, class)
+			return component.EgressResponse{Accept: true}, &component.Audit{Action: "request", Target: c.Name + " " + target, Outcome: "allow", Detail: class + fmt.Sprintf(" %d from the member's computer", r.Status)}
+		}
+		if r.Attempt >= component.MaxEgressSends {
+			return s.failed(ctx, t, c, in, u, errReconnect)
+		}
+		s.dropAuth(grantKey{t.Requester, t.Org, c.Name})
+		force = true
+	}
+	auth, err := s.credentials(ctx, c, t.Org, t.Requester, g, force)
+	if err != nil {
+		return s.failed(ctx, t, c, in, u, err)
+	}
+	return component.EgressResponse{Send: &component.EgressSend{Remove: c.CredentialHeaders(), Header: auth.header, Query: auth.query}}, nil
 }
 
 // call makes the request as the member: every credential the agent sent is

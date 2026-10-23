@@ -170,6 +170,7 @@ const (
 	heldPrefix      = "held:"
 	activityPrefix  = "activity:"
 	statePrefix     = "state:"
+	allowPrefix     = "allow:"
 )
 
 // connectors are the organization's connectors, sorted by name (cached).
