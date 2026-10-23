@@ -61,7 +61,7 @@ func run() error {
 	}
 	_ = os.Unsetenv(envSecret)
 	svc := &service.Service{
-		P:        &platform.Platform{BaseURL: gateway, Name: envOr(envName, "connections"), Secret: secret},
+		P:        platform.New(gateway, envOr(envName, "connections"), secret),
 		BasePath: strings.TrimSpace(os.Getenv(envBasePath)),
 		Upstream: service.Guarded(),
 	}

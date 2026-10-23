@@ -132,7 +132,7 @@ func newFixture(t *testing.T) *fixture {
 		},
 		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
 	}
-	fx.svc = &Service{P: &platform.Platform{BaseURL: storeSrv.URL, Name: "connections", Secret: testSecret}, Upstream: client}
+	fx.svc = &Service{P: platform.New(storeSrv.URL, "connections", testSecret), Upstream: client}
 	fx.h = fx.svc.Handler()
 	return fx
 }
