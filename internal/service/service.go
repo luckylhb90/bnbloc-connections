@@ -14,6 +14,7 @@ import (
 	"log/slog"
 	"net/http"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -96,10 +97,38 @@ func (s *Service) read(w http.ResponseWriter, r *http.Request, header string) ([
 		return nil, false
 	}
 	if err := s.P.Verify(r, strings.TrimRight(s.BasePath, "/"), header, body); err != nil {
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": err.Error()})
+		why := s.whyUnsigned(r, header, body)
+		slog.Warn("connections: a call is not signed by bnbloc", "method", r.Method, "uri", r.URL.RequestURI(), "why", why)
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": err.Error(), "why": why})
 		return nil, false
 	}
 	return body, true
+}
+
+// whyUnsigned names what is wrong with a call's signature, never a value:
+// no credential set here, no signature, a timestamp off this clock, or a
+// mismatch (another credential, or a call changed on its way: the path
+// verified is in the log line).
+func (s *Service) whyUnsigned(r *http.Request, header string, body []byte) string {
+	sig := r.Header.Get(component.SignatureHeader)
+	switch {
+	case strings.TrimSpace(s.P.Secret) == "":
+		return "no credential is set in this process (BNBLOC_CONNECTIONS_SECRET)"
+	case sig == "":
+		return "the call carries no signature"
+	case header != "" && r.Header.Get(header) == "":
+		return "the call carries no " + header
+	}
+	for _, part := range strings.Split(sig, ",") {
+		if ts, ok := strings.CutPrefix(strings.TrimSpace(part), "t="); ok {
+			if unix, err := strconv.ParseInt(ts, 10, 64); err == nil {
+				if d := s.now().Sub(time.Unix(unix, 0)); d > component.SignatureTolerance || d < -component.SignatureTolerance {
+					return "the signature's time is " + d.Round(time.Second).String() + " off this clock"
+				}
+			}
+		}
+	}
+	return "the signature does not match: another credential than bnbloc's, or a path changed on its way (verified " + r.Method + " " + strings.TrimPrefix(r.URL.RequestURI(), strings.TrimRight(s.BasePath, "/")) + ")"
 }
 
 func (s *Service) turn(h turnHandler) http.HandlerFunc {
