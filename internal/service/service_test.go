@@ -391,6 +391,51 @@ func TestOAuthConnectExchangeAndRefresh(t *testing.T) {
 	}
 }
 
+// A provider shaped like Google: endpoints from issuer discovery, the client
+// in the form ("post"), and a disconnect revoking the grant the same way.
+func TestOAuthDiscoveryPostClientAndRevoke(t *testing.T) {
+	fx := newFixture(t)
+	fx.answer = func(r *http.Request) (int, string) {
+		if r.URL.Path == "/.well-known/openid-configuration" {
+			return 200, `{"issuer":"https://example.com","authorization_endpoint":"https://example.com/oauth/authorize",` +
+				`"token_endpoint":"https://example.com/oauth/token","revocation_endpoint":"https://example.com/oauth/revoke"}`
+		}
+		return 200, `{"ok":true}`
+	}
+	c := issues()
+	c.Connect = connector.Connect{Kind: connector.KindOAuth2, OAuth2: &connector.OAuth2{
+		Issuer: "https://example.com", ClientID: "client-1", ClientAuth: "post",
+		Scopes: connector.Scopes{Read: []string{"read"}}, AuthParams: map[string]string{"access_type": "offline"},
+	}}
+	fx.addConnector(c)
+	_ = fx.svc.P.PutJSON(context.Background(), platform.Org("home"), secretsPrefix+"issues", connector.Secrets{ClientSecret: "client-secret"})
+	page := fx.page(false, http.MethodPost, "/pages/connections/connect", url.Values{"system": {"issues"}, "reach": {"read"}})
+	loc, _ := url.Parse(page.Header().Get("Location"))
+	if loc.Path != "/oauth/authorize" || loc.Query().Get("access_type") != "offline" {
+		t.Fatalf("authorize = %d %s", page.Code, loc)
+	}
+	cb := "/callbacks/oauth?code=CODE-1&state=" + url.QueryEscape(loc.Query().Get("state"))
+	if done := fx.do(http.MethodGet, cb, component.CallbackHeader, component.Callback{}, nil); done.Code != 200 {
+		t.Fatalf("callback = %d %s", done.Code, done.Body)
+	}
+	tokenCall := fx.last()
+	form, _ := url.ParseQuery(tokenCall.body)
+	if form.Get("client_id") != "client-1" || form.Get("client_secret") != "client-secret" || tokenCall.header.Get("Authorization") != "" {
+		t.Fatalf("token call = %+v", tokenCall)
+	}
+	if out := fx.page(false, http.MethodPost, "/pages/connections/disconnect", url.Values{"system": {"issues"}}); out.Code != http.StatusSeeOther {
+		t.Fatalf("disconnect = %d %s", out.Code, out.Body)
+	}
+	revoke := fx.last()
+	form, _ = url.ParseQuery(revoke.body)
+	if revoke.path != "/oauth/revoke" || form.Get("token") != "refresh-1" || form.Get("client_id") != "client-1" || form.Get("client_secret") != "client-secret" {
+		t.Fatalf("revoke = %+v", revoke)
+	}
+	if raw := fx.store.get("members/maya/grant:home:issues"); raw != nil {
+		t.Fatalf("the grant outlived the disconnect: %s", raw)
+	}
+}
+
 // idpAnswer is a token endpoint: the code once, then rotating refreshes.
 func (fx *fixture) idpAnswer(w http.ResponseWriter, _ *http.Request, body []byte) {
 	form, _ := url.ParseQuery(string(body))

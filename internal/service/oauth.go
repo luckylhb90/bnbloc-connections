@@ -176,24 +176,11 @@ func (s *Service) token(ctx context.Context, c connector.Connector, org string, 
 	if err != nil {
 		return tokenAnswer{}, err
 	}
-	secret := s.secrets(ctx, org, c.Name).ClientSecret
-	if o.ClientAuth == "post" {
-		form.Set("client_id", o.ClientID)
-		if secret != "" {
-			form.Set("client_secret", secret)
-		}
-	} else if secret == "" {
-		form.Set("client_id", o.ClientID)
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, e.Token, strings.NewReader(form.Encode()))
+	req, err := s.clientRequest(ctx, c, org, e.Token, form)
 	if err != nil {
 		return tokenAnswer{}, err
 	}
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.Header.Set("Accept", "application/json")
-	if o.ClientAuth != "post" && secret != "" {
-		req.SetBasicAuth(url.QueryEscape(o.ClientID), url.QueryEscape(secret))
-	}
 	resp, err := s.upstream().Do(req)
 	if err != nil {
 		return tokenAnswer{}, fmt.Errorf("the token endpoint is unreachable: %w", err)
@@ -215,6 +202,30 @@ func (s *Service) token(ctx context.Context, c connector.Connector, org string, 
 	return t, nil
 }
 
+// clientRequest is a form POST to a token or revocation endpoint carrying
+// the client's credentials: in the form ("post"), as HTTP Basic otherwise,
+// or the bare client_id for a client without a secret.
+func (s *Service) clientRequest(ctx context.Context, c connector.Connector, org, endpoint string, form url.Values) (*http.Request, error) {
+	o := c.Connect.OAuth2
+	secret := s.secrets(ctx, org, c.Name).ClientSecret
+	basic := o.ClientAuth != "post" && secret != ""
+	if !basic {
+		form.Set("client_id", o.ClientID)
+		if secret != "" {
+			form.Set("client_secret", secret)
+		}
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, strings.NewReader(form.Encode()))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	if basic {
+		req.SetBasicAuth(url.QueryEscape(o.ClientID), url.QueryEscape(secret))
+	}
+	return req, nil
+}
+
 func (s *Service) refresh(ctx context.Context, c connector.Connector, org, refresh string) (tokenAnswer, error) {
 	return s.token(ctx, c, org, url.Values{"grant_type": {"refresh_token"}, "refresh_token": {refresh}})
 }
@@ -233,17 +244,9 @@ func (s *Service) revoke(ctx context.Context, c connector.Connector, org string,
 	if tok == "" {
 		tok = g.AccessToken
 	}
-	form := url.Values{"token": {tok}}
-	secret := s.secrets(ctx, org, c.Name).ClientSecret
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, e.Revocation, strings.NewReader(form.Encode()))
+	req, err := s.clientRequest(ctx, c, org, e.Revocation, url.Values{"token": {tok}})
 	if err != nil {
 		return
-	}
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	if secret != "" {
-		req.SetBasicAuth(url.QueryEscape(o.ClientID), url.QueryEscape(secret))
-	} else {
-		form.Set("client_id", o.ClientID)
 	}
 	resp, err := s.upstream().Do(req)
 	if err != nil {
