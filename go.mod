@@ -6,7 +6,7 @@ require (
 	github.com/aws/aws-sdk-go-v2 v1.47.1
 	github.com/aws/aws-sdk-go-v2/config v1.33.6
 	github.com/aws/aws-sdk-go-v2/service/secretsmanager v1.39.6
-	github.com/luckylhb90/bnbloc v0.1.1-0.20261023091436-4c4f9c70c613
+	github.com/luckylhb90/bnbloc v0.1.1-0.20261023101613-8a3bada882ad
 )
 
 require (

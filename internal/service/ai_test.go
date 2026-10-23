@@ -37,7 +37,7 @@ func (fx *fixture) adminPage() string {
 // reviewed when it arrives, and its answer to the agent does not change.
 func TestConnectorReviewForTheAdmin(t *testing.T) {
 	fx := newFixture(t)
-	fx.store.assist = func(task string, req component.AssistRequest) map[string]any {
+	fx.store.assist = func(task string, req component.ServiceAssistRequest) map[string]any {
 		return map[string]any{
 			"summary":  "Agents read issues and, after the member allows it, file and delete them.",
 			"reads":    []any{"Read issues"},
@@ -103,7 +103,7 @@ func TestRulesProposedFromUse(t *testing.T) {
 	if err := fx.svc.saveGrant(context.Background(), "maya", "home", Grant{Connector: "issues", Reach: connector.Read, APIKey: "k"}); err != nil {
 		t.Fatal(err)
 	}
-	fx.store.assist = func(task string, req component.AssistRequest) map[string]any {
+	fx.store.assist = func(task string, req component.ServiceAssistRequest) map[string]any {
 		if task != "connections-propose-rules" {
 			return map[string]any{"summary": "ok"}
 		}
@@ -151,7 +151,7 @@ func TestRulesProposedFromUse(t *testing.T) {
 
 	_, _ = fx.egress(component.DriveOwn, "PATCH", "https://example.com/search/x", `{}`, nil)
 	fx.store.takeRuns()
-	fx.store.assist = func(string, component.AssistRequest) map[string]any {
+	fx.store.assist = func(string, component.ServiceAssistRequest) map[string]any {
 		return map[string]any{"rules": []any{map[string]any{"class": "write", "method": "PATCH", "path": "/search/*", "why": "an edit"}}}
 	}
 	_ = fx.page(true, http.MethodPost, "/pages/admin/propose", url.Values{"name": {"issues"}})

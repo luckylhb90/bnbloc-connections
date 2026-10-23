@@ -66,10 +66,10 @@ func aiContext() (context.Context, context.CancelFunc) {
 
 // assist runs one of the component's tasks for org, for member.
 func (s *Service) assist(ctx context.Context, task, org, member, text string) (map[string]any, error) {
-	if len([]rune(text)) > component.MaxAssistText {
-		text = string([]rune(text)[:component.MaxAssistText])
+	if len([]rune(text)) > component.MaxServiceAssistText {
+		text = string([]rune(text)[:component.MaxServiceAssistText])
 	}
-	return s.P.Assist(ctx, s.task(task), component.AssistRequest{Org: org, Member: member, Text: text})
+	return s.P.Assist(ctx, s.task(task), component.ServiceAssistRequest{Org: org, Member: member, Text: text})
 }
 
 // aiError is what a page says about a run that did not happen.
