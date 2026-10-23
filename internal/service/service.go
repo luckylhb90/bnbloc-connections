@@ -64,6 +64,10 @@ func (s *Service) Handler() http.Handler {
 	mux.HandleFunc("GET "+component.ServiceDiscoverPath, func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]string{"name": s.P.Name, "contract": component.ServiceContractV1})
 	})
+	// The liveness and readiness probe of the process (unsigned, no data).
+	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
+		writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+	})
 	mux.HandleFunc("GET "+component.ServiceEgressHostsPath, s.turn(s.handleHosts))
 	mux.HandleFunc("POST "+component.ServiceEgressRequestPath, s.turn(s.handleEgress))
 	mux.HandleFunc("GET "+component.ServiceFactsPath, s.turn(s.handleFacts))

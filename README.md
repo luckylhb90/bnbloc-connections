@@ -146,6 +146,9 @@ they expire.
 Environment: `BNBLOC_CONNECTIONS_BNBLOC_URL` (the gateway as this process
 reaches it, required), `BNBLOC_CONNECTIONS_SECRET` (the credential the
 install showed once), `BNBLOC_CONNECTIONS_LISTEN` (default `:8098`).
+Health: `GET /healthz` answers `200 {"ok":true}` (unsigned, no data): the
+liveness and readiness probe. `GET /discover` is open too (the install
+probe).
 `BNBLOC_CONNECTIONS_NAME` is the install name (default `connections`);
 `BNBLOC_CONNECTIONS_BASE_PATH` a path prefix when it is served under one.
 

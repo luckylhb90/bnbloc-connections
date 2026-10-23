@@ -227,13 +227,18 @@ func auditOf(t *testing.T, rec *httptest.ResponseRecorder) component.Audit {
 	return a
 }
 
-// Unsigned calls are refused; discover is open.
+// Unsigned calls are refused; discover and the health probe are open.
 func TestCallsMustBeSigned(t *testing.T) {
 	fx := newFixture(t)
 	rec := httptest.NewRecorder()
 	fx.h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, component.ServiceEgressHostsPath, nil))
 	if rec.Code != http.StatusUnauthorized {
 		t.Fatalf("unsigned = %d", rec.Code)
+	}
+	rec = httptest.NewRecorder()
+	fx.h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/healthz", nil))
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"ok":true`) {
+		t.Fatalf("healthz = %d %s", rec.Code, rec.Body)
 	}
 	rec = httptest.NewRecorder()
 	fx.h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, component.ServiceDiscoverPath, nil))
