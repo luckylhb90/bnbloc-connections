@@ -1,0 +1,30 @@
+name: release
+
+# A pushed tag vX.Y.Z builds the linux binaries and attaches them, with
+# SHA256SUMS.txt, to the GitHub release of that tag.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with: { go-version-file: go.mod }
+      - name: Build
+        run: |
+          mkdir -p dist
+          ldflags="-s -w -X main.version=${GITHUB_REF_NAME} -X main.commit=${GITHUB_SHA}"
+          for target in linux/amd64 linux/arm64 darwin/arm64; do
+            os=${target%/*}; arch=${target#*/}
+            CGO_ENABLED=0 GOOS=$os GOARCH=$arch go build -trimpath -ldflags "$ldflags" -o "dist/bnbloc-connections-${os}-${arch}" .
+          done
+          (cd dist && sha256sum * > SHA256SUMS.txt)
+      - name: Release
+        env: { GH_TOKEN: "${{ github.token }}" }
+        run: gh release create "$GITHUB_REF_NAME" dist/* --title "bnbloc-connections $GITHUB_REF_NAME" --generate-notes
