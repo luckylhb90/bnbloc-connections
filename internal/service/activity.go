@@ -22,13 +22,21 @@ type Call struct {
 	Path      string `json:"path"`
 	Status    int    `json:"status,omitempty"`
 	Outcome   string `json:"outcome"`
+	// As is the digital worker the call acted as ("": the member); Member
+	// who asked (in a worker's own record).
+	As     string `json:"as,omitempty"`
+	Member string `json:"member,omitempty"`
 }
 
 // maxActivity bounds the calls kept per member and organization.
 const maxActivity = 100
 
-// activityKey is one member's activity in one organization.
-type activityKey struct{ member, org string }
+// activityKey is one record of calls: a member's in one organization, or
+// a worker's (in the organization's scope).
+type activityKey struct {
+	scope platform.Scope
+	key   string
+}
 
 // activityQueue holds calls not yet written: a request only queues its
 // call, and one writer per member and organization appends what queued
@@ -40,10 +48,19 @@ type activityQueue struct {
 	writing map[activityKey]bool
 }
 
-// record keeps one call in the member's activity (best-effort).
-func (s *Service) record(ctx context.Context, t component.Turn, c connector.Connector, method, path string, status int, outcome string) {
-	k := activityKey{t.Requester, t.Org}
-	call := Call{AtMs: s.now().UnixMilli(), Room: t.Room, Connector: c.Name, Method: method, Path: clip(path, 200), Status: status, Outcome: outcome}
+// record keeps one call in the requester's activity and, acting as a
+// worker, in the worker's (best-effort).
+func (s *Service) record(_ context.Context, t component.Turn, p principal, c connector.Connector, method, path string, status int, outcome string) {
+	call := Call{AtMs: s.now().UnixMilli(), Room: t.Room, Connector: c.Name, Method: method, Path: clip(path, 200), Status: status, Outcome: outcome, As: p.asID()}
+	s.queueCall(activityKey{platform.Member(t.Requester), activityPrefix + t.Org}, call)
+	if p.Worker != nil {
+		call.Member = t.Requester
+		s.queueCall(activityKey{platform.Org(t.Org), workerActivityPref + p.Worker.ID}, call)
+	}
+}
+
+// queueCall queues one call for its record; one writer per record.
+func (s *Service) queueCall(k activityKey, call Call) {
 	q := &s.activityQ
 	q.mu.Lock()
 	if q.pending == nil {
@@ -72,16 +89,15 @@ func (s *Service) writeActivity(k activityKey) {
 		}
 		q.mu.Unlock()
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-		key := activityPrefix + k.org
 		var list []Call
-		if _, err := s.P.GetJSON(ctx, platform.Member(k.member), key, &list); err != nil {
+		if _, err := s.P.GetJSON(ctx, k.scope, k.key, &list); err != nil {
 			slog.Warn("connections: activity unreadable", "error", err)
 		}
 		list = append(list, calls...)
 		if len(list) > maxActivity {
 			list = list[len(list)-maxActivity:]
 		}
-		if err := s.P.PutJSON(ctx, platform.Member(k.member), key, list); err != nil {
+		if err := s.P.PutJSON(ctx, k.scope, k.key, list); err != nil {
 			slog.Warn("connections: activity not kept", "error", err)
 		}
 		cancel()

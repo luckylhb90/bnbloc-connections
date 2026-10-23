@@ -26,6 +26,8 @@ type SystemView struct {
 	// Changes: "allowed" (made without asking), "asked" (each one waits for
 	// the person), "" when not connected.
 	Changes string `json:"changes,omitempty"`
+	// As: the digital worker the agent acts as there ("": the person).
+	As string `json:"as,omitempty"`
 }
 
 // Draft is a connector an agent drafted, waiting for an admin.
@@ -41,17 +43,24 @@ func jsonAnswer(status int, v any) component.EgressResponse {
 	return component.EgressResponse{Status: status, Header: map[string][]string{"Content-Type": {"application/json"}}, Body: raw}
 }
 
+// systems are the enabled systems as the member's own agent reaches them.
 func (s *Service) systems(ctx context.Context, member, org string) ([]SystemView, error) {
-	list, err := s.enabled(ctx, org)
+	return s.systemsFor(ctx, component.Turn{Requester: member, Org: org, Drive: component.DriveOwn})
+}
+
+// systemsFor are the enabled systems as t's agent reaches them: connected
+// when someone serves the request there (actingAs), and as whom.
+func (s *Service) systemsFor(ctx context.Context, t component.Turn) ([]SystemView, error) {
+	list, err := s.enabled(ctx, t.Org)
 	if err != nil {
 		return nil, err
 	}
 	out := make([]SystemView, 0, len(list))
 	for _, c := range list {
 		v := SystemView{Name: c.Name, DisplayName: c.DisplayName, Purpose: c.Purpose, Hosts: c.Hosts}
-		if g, ok, _ := s.grant(ctx, member, org, c.Name); ok {
-			v.Connected, v.Changes = true, "asked"
-			if g.Reach == connector.Write {
+		if a, err := s.actingAs(ctx, t, c); err == nil && a.ok {
+			v.Connected, v.Changes, v.As = true, "asked", a.p.as()
+			if a.g.Reach == connector.Write {
 				v.Changes = "allowed"
 			}
 		}

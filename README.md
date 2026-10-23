@@ -139,6 +139,39 @@ Connected systems are reached with redirects never followed and never at
 loopback, link-local (cloud metadata) or unspecified addresses; an
 organization's private addresses are allowed.
 
+## Digital workers
+
+Accounts of the organization that are not a person (a release bot, a wiki
+bot), which agents may act as
+(`docs/prd/2026-10-23-connections-digital-workers.md` in bnbloc). On the
+**Digital workers** page an admin adds one: its id, name, `account` (its
+name in the directory the providers sign in with), owners, the members
+whose agents may act as it (`*` for everyone) and which agents (the
+member's own, the organization's platform agents, a borrowed one). An
+owner or an admin connects it to a system through the system's provider,
+which signs in as its account (`provider.Call.Principal`, kind `worker`;
+a directory that grants bot accounts directly needs no consent), and sets
+its reach (each change asks the person who asked, or changes without
+asking).
+
+Who a request acts as is decided from the attested turn, never by the
+agent:
+
+1. The member's own agent: the worker the member chose for that system on
+   Connections, if it serves them and is connected; else the member's own
+   connection.
+2. Else a connected worker that serves the member on that agent.
+3. Else a card to connect (naming a worker its owners could connect); a
+   borrowed or platform agent is told only a digital worker serves it.
+
+A person's own connection serves only their own agent. A borrowed or
+platform agent gets only the systems a worker serves it at (hosts, facts).
+The facts line says `jira (as Release bot)`. A change as a worker asks
+the person who asked; the system sees the worker; the activity, the
+worker's own record (its page) and the audit row name both. A worker's
+credentials never go to a borrowed agent's computer (a connector sent
+from members' computers is refused there).
+
 ## AI for the admin
 
 The component's own AI helps the admin decide; it never sits in a

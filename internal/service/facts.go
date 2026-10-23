@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"slices"
 	"strings"
 	"time"
 
@@ -11,19 +12,20 @@ import (
 	"github.com/luckylhb90/bnbloc/component"
 )
 
-// handleFacts gives the turn its line and files: the systems the person's
-// own agent reaches as them (INDEX.md), each one's guide, the person's
-// recent calls in this room (ACTIVITY.md), and how to draft a connector.
-// Another drive, or an organization with nothing enabled, gets nothing.
+// handleFacts gives the turn its line and files: the systems the agent
+// reaches and as whom (INDEX.md), each one's guide, the person's recent
+// calls in this room (ACTIVITY.md), and, for the person's own agent, how
+// to draft a connector. A borrowed or platform agent gets only the systems
+// a digital worker serves it at; an organization with nothing enabled,
+// nothing.
 func (s *Service) handleFacts(w http.ResponseWriter, r *http.Request, t component.Turn, _ []byte) {
-	if t.Drive != component.DriveOwn {
-		writeJSON(w, http.StatusOK, component.Facts{})
-		return
-	}
-	systems, err := s.systems(r.Context(), t.Requester, t.Org)
+	systems, err := s.systemsFor(r.Context(), t)
 	if err != nil {
 		writeJSON(w, http.StatusBadGateway, map[string]string{"error": "connectors unreadable"})
 		return
+	}
+	if t.Drive != component.DriveOwn {
+		systems = slices.DeleteFunc(systems, func(v SystemView) bool { return !v.Connected })
 	}
 	if len(systems) == 0 {
 		writeJSON(w, http.StatusOK, component.Facts{})
@@ -34,17 +36,29 @@ func (s *Service) handleFacts(w http.ResponseWriter, r *http.Request, t componen
 
 func (s *Service) facts(ctx context.Context, t component.Turn, systems []SystemView) component.Facts {
 	names := make([]string, 0, len(systems))
+	shown := map[string]bool{}
 	for _, v := range systems {
+		shown[v.Name] = true
+		if v.As != "" {
+			names = append(names, v.Name+" (as "+v.As+")")
+			continue
+		}
 		names = append(names, v.Name)
 	}
 	line := fmt.Sprintf("systems you reach as %s with plain HTTPS (curl, scripts, CLIs): %s; INDEX.md says what each is for", t.Requester, strings.Join(names, ", "))
 	if len([]rune(line)) > component.MaxFactsLine {
-		line = fmt.Sprintf("%d systems you reach as %s with plain HTTPS; INDEX.md lists them", len(names), t.Requester)
+		line = fmt.Sprintf("%d systems you reach with plain HTTPS; INDEX.md lists them and as whom", len(names))
 	}
-	files := map[string]string{"INDEX.md": s.index(t, systems), "DRAFTING.md": s.drafting()}
+	files := map[string]string{"INDEX.md": s.index(t, systems)}
+	if t.Drive == component.DriveOwn {
+		files["DRAFTING.md"] = s.drafting()
+	}
 	list, _ := s.enabled(ctx, t.Org)
 	budget := component.MaxFactsBytes - len(files["INDEX.md"]) - len(files["DRAFTING.md"]) - 8<<10
 	for _, c := range list {
+		if !shown[c.Name] {
+			continue
+		}
 		g := guide(c)
 		if len(g) > budget || len(files) >= component.MaxFactsFiles-1 {
 			continue
@@ -64,15 +78,20 @@ func (s *Service) index(t component.Turn, systems []SystemView) string {
 	b.WriteString("Call them with ordinary HTTPS (curl, a script, a CLI): bnbloc authenticates each request as the person on its way out. Never ask for a token and never send one: any credential you send is replaced.\n\n")
 	b.WriteString("- Not connected: the call answers 403 and the person gets a card to connect it. Tell them, and continue after they do.\n")
 	b.WriteString("- A change (`changes: asked`) answers 202 `held`: the person gets a card to allow it. It is not made until they do; say so, do not retry.\n\n")
-	b.WriteString("| System | Hosts | For | Connected | Changes |\n|---|---|---|---|---|\n")
+	b.WriteString("| System | Hosts | For | Connected | Changes | As |\n|---|---|---|---|---|---|\n")
 	for _, v := range systems {
-		conn, changes := "no", "-"
+		conn, changes, as := "no", "-", "-"
 		if v.Connected {
-			conn, changes = "yes", v.Changes
+			conn, changes, as = "yes", v.Changes, t.Requester
+			if v.As != "" {
+				as = v.As + " (a digital worker; " + t.Requester + " asked)"
+			}
 		}
-		fmt.Fprintf(&b, "| %s (`%s`, guide: %s.md) | %s | %s | %s | %s |\n", v.DisplayName, v.Name, v.Name, strings.Join(v.Hosts, ", "), v.Purpose, conn, changes)
+		fmt.Fprintf(&b, "| %s (`%s`, guide: %s.md) | %s | %s | %s | %s | %s |\n", v.DisplayName, v.Name, v.Name, strings.Join(v.Hosts, ", "), v.Purpose, conn, changes, as)
 	}
-	fmt.Fprintf(&b, "\nThe connections API itself is `https://%s/` (GET / lists it): the systems' state, the person's recent calls, and connector drafts (DRAFTING.md).\n", s.SelfHost())
+	if t.Drive == component.DriveOwn {
+		fmt.Fprintf(&b, "\nThe connections API itself is `https://%s/` (GET / lists it): the systems' state, the person's recent calls, and connector drafts (DRAFTING.md).\n", s.SelfHost())
+	}
 	return b.String()
 }
 

@@ -37,20 +37,40 @@ func Verify(header, secret string, body []byte, now time.Time) error {
 }
 
 // Call is what every call carries: the member (their subject in bnbloc and
-// organization), the connector's app (the provider's name for the system),
+// organization) and who it signs in as, the connector's app (the provider's name for the system),
 // the reach asked (read or write), and the grant the provider gave at
 // connect ("" on a first connect).
 type Call struct {
 	Member string `json:"member"`
 	Org    string `json:"org"`
-	App    string `json:"app"`
-	Reach  string `json:"reach,omitempty"`
-	Grant  string `json:"grant,omitempty"`
+	// Principal is who the call signs in as; nil: the member. For a
+	// digital worker, Member is the person who asked.
+	Principal *Principal `json:"principal,omitempty"`
+	App       string     `json:"app"`
+	Reach     string     `json:"reach,omitempty"`
+	Grant     string     `json:"grant,omitempty"`
 	// Force: authorize again (the system refused what was given).
 	Force bool `json:"force,omitempty"`
 	// Params are the connector's per-system values for the provider.
 	Params map[string]string `json:"params,omitempty"`
 }
+
+// Principal is who a call signs in as: a member (Kind PrincipalMember, ID
+// their subject) or a digital worker of the organization (Kind
+// PrincipalWorker, ID its id in connections, Account its name in the
+// provider's directory). A provider keeps a worker's grants apart from any
+// person's.
+type Principal struct {
+	Kind    string `json:"kind"`
+	ID      string `json:"id"`
+	Account string `json:"account,omitempty"`
+}
+
+// Principal kinds.
+const (
+	PrincipalMember = "member"
+	PrincipalWorker = "worker"
+)
 
 // Connect states.
 const (

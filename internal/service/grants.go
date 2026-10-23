@@ -113,14 +113,14 @@ func (s *Service) grantLock(k grantKey) *sync.Mutex {
 // errReconnect: the grant no longer works; the member connects again.
 var errReconnect = errors.New("the connection no longer works")
 
-// credentials are what a request to c carries for the member: from memory
+// credentials are what a request to c carries for the principal: from memory
 // while they last, else made from the grant (an OAuth refresh, the key, the
 // provider's authorization). force skips the memory (after a refusal),
 // unless another request made them meanwhile. One grant's are made one at
 // a time (grantLock), from the grant as stored then (a refresh token
 // another request rotated).
-func (s *Service) credentials(ctx context.Context, c connector.Connector, org, member string, g *Grant, force bool) (cachedAuth, error) {
-	k := grantKey{member, org, c.Name}
+func (s *Service) credentials(ctx context.Context, c connector.Connector, org string, p principal, g *Grant, force bool) (cachedAuth, error) {
+	k := grantKey{p.key(), org, c.Name}
 	start := s.now()
 	if !force {
 		if a, ok := s.cachedAuthFor(k); ok {
@@ -133,7 +133,7 @@ func (s *Service) credentials(ctx context.Context, c connector.Connector, org, m
 	if a, ok := s.cachedAuthFor(k); ok && (!force || !a.at.Before(start)) {
 		return a, nil
 	}
-	if fresh, ok, err := s.grant(ctx, member, org, c.Name); err == nil && ok {
+	if fresh, ok, err := s.grantOf(ctx, p, org, c.Name); err == nil && ok {
 		*g = fresh
 	}
 	var a cachedAuth
@@ -147,9 +147,9 @@ func (s *Service) credentials(ctx context.Context, c connector.Connector, org, m
 		a = apiKeyAuth(*c.Connect.APIKey, g.APIKey)
 		a.until = s.now().Add(time.Hour)
 	case connector.KindOAuth2:
-		a, err = s.oauthAuth(ctx, c, org, member, g, force)
+		a, err = s.oauthAuth(ctx, c, org, p, g, force)
 	case connector.KindProvider:
-		a, err = s.providerAuth(ctx, c, org, member, g, force)
+		a, err = s.providerAuth(ctx, c, org, p, g, force)
 	default:
 		err = fmt.Errorf("unknown connect kind %q", c.Connect.Kind)
 	}
@@ -196,7 +196,7 @@ func cutColon(s string) (string, string, bool) {
 
 // oauthAuth is a bearer access token: refreshed with the grant's refresh
 // token (a rotated one is kept), or the stored access token while it lasts.
-func (s *Service) oauthAuth(ctx context.Context, c connector.Connector, org, member string, g *Grant, force bool) (cachedAuth, error) {
+func (s *Service) oauthAuth(ctx context.Context, c connector.Connector, org string, p principal, g *Grant, force bool) (cachedAuth, error) {
 	bearer := func(tok string, until time.Time) cachedAuth {
 		return cachedAuth{header: http.Header{"Authorization": {"Bearer " + tok}}, until: until}
 	}
@@ -216,7 +216,7 @@ func (s *Service) oauthAuth(ctx context.Context, c connector.Connector, org, mem
 	}
 	if tok.RefreshToken != "" && tok.RefreshToken != g.RefreshToken {
 		g.RefreshToken = tok.RefreshToken
-		if err := s.saveGrant(ctx, member, org, *g); err != nil {
+		if err := s.saveGrantOf(ctx, p, org, *g); err != nil {
 			return cachedAuth{}, fmt.Errorf("keep the rotated refresh token: %w", err)
 		}
 	}

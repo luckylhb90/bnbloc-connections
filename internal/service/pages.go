@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"slices"
 	"strings"
 	"time"
 
@@ -27,7 +28,7 @@ var pageFiles embed.FS
 
 var pageTemplates = func() map[string]*template.Template {
 	out := map[string]*template.Template{}
-	for _, name := range []string{"connections", "approve", "admin", "callback"} {
+	for _, name := range []string{"connections", "approve", "admin", "callback", "workers"} {
 		out[name] = template.Must(template.ParseFS(pageFiles, "pages/layout.html", "pages/"+name+".html"))
 	}
 	return out
@@ -50,6 +51,7 @@ func (s *Service) handlePageList(w http.ResponseWriter, _ *http.Request, _ compo
 	writeJSON(w, http.StatusOK, component.PageList{Pages: []component.Page{
 		{Name: "connections", Label: "Connections", Audience: component.AudienceMember},
 		{Name: "admin", Label: "Connectors", Audience: component.AudienceAdmin},
+		{Name: "workers", Label: "Digital workers", Audience: component.AudienceMember},
 	}})
 }
 
@@ -66,6 +68,8 @@ func (s *Service) handlePage(w http.ResponseWriter, r *http.Request, m component
 		s.connectionsPage(w, r, m, action, form)
 	case "approve":
 		s.approvePage(w, r, m, action, form)
+	case "workers":
+		s.workersPage(w, r, m, action, form)
 	case "admin":
 		if !m.Admin {
 			s.callbackPage(w, http.StatusForbidden, "Connectors", "Only an administrator of your organization manages connectors.")
@@ -92,6 +96,10 @@ type systemRow struct {
 	Kind      string
 	Help      string
 	Highlight bool
+	// Workers serve the member's own agents here; Chosen is the one they
+	// chose to act as ("": themselves).
+	Workers []Worker
+	Chosen  string
 }
 
 type activityRow struct {
@@ -117,6 +125,22 @@ func (s *Service) connectionsPage(w http.ResponseWriter, r *http.Request, m comp
 	case "reach":
 		s.setReach(w, ctx, m, form.Get("system"), form.Get("reach"))
 		return
+	case "actas":
+		name, id := form.Get("system"), form.Get("worker")
+		if id != "" {
+			wk, ok := s.worker(ctx, m.Org, id)
+			if !ok || !wk.Serves(m.Subject, component.DriveOwn) {
+				back(w, m, "That digital worker does not serve your agents.", true)
+				return
+			}
+		}
+		if err := s.setChoice(ctx, m.Subject, m.Org, name, id); err != nil {
+			back(w, m, "Not saved: "+err.Error(), true)
+			return
+		}
+		audit(w, component.Audit{Action: "act-as", Target: name, Outcome: "ok", Detail: firstNonEmpty(id, "themselves")})
+		back(w, m, "Saved.", false)
+		return
 	case "change":
 		// A waiting change, opened from this page: its review, deciding
 		// under this page's address.
@@ -135,11 +159,13 @@ func (s *Service) connectionsPage(w http.ResponseWriter, r *http.Request, m comp
 		return
 	}
 	list, _ := s.enabled(ctx, m.Org)
+	ws, _ := s.workers(ctx, m.Org)
+	ws = slices.DeleteFunc(ws, func(wk Worker) bool { return !wk.Serves(m.Subject, component.DriveOwn) })
 	q := r.URL.Query()
 	rows := make([]systemRow, 0, len(systems))
 	for i, v := range systems {
 		c := list[i]
-		row := systemRow{SystemView: v, Kind: c.Connect.Kind, Highlight: q.Get("system") == v.Name}
+		row := systemRow{SystemView: v, Kind: c.Connect.Kind, Highlight: q.Get("system") == v.Name, Workers: ws, Chosen: s.choice(ctx, m.Subject, m.Org, c.Name)}
 		switch {
 		case c.Connect.APIKey != nil:
 			row.Help = c.Connect.APIKey.Help
@@ -298,25 +324,40 @@ func (s *Service) approvePage(w http.ResponseWriter, r *http.Request, m componen
 	}
 	u, _ := url.Parse(h.Request.URL)
 	data["System"] = c.DisplayName
+	p := asMember(m.Subject)
+	if h.As != "" {
+		wk, found := s.worker(ctx, m.Org, h.As)
+		if !found || !wk.Serves(m.Subject, firstNonEmpty(h.Drive, component.DriveOwn)) {
+			_ = s.P.Delete(ctx, platform.Member(m.Subject), heldPrefix+h.ID)
+			s.callbackPage(w, http.StatusOK, "Not made", "The digital worker this change acts as no longer serves you here.")
+			return
+		}
+		p = principal{Member: m.Subject, Worker: &wk}
+		data["As"] = wk.DisplayName
+	}
 	if action != "decide" {
 		data["Held"], data["Path"], data["Body"] = h, u.Path, bodySummary(h.Request.Body)
 		data["Asked"] = time.UnixMilli(h.CreatedAtMs).UTC().Format("Jan 2 15:04 UTC")
 		render(w, http.StatusOK, "approve", data)
 		return
 	}
-	t := component.Turn{Org: h.Org, Room: h.Room, Job: h.Job, Requester: m.Subject, Drive: component.DriveOwn}
+	t := component.Turn{Org: h.Org, Room: h.Room, Job: h.Job, Requester: m.Subject, Drive: firstNonEmpty(h.Drive, component.DriveOwn)}
 	if form.Get("decision") != "allow" {
 		_ = s.P.Delete(ctx, platform.Member(m.Subject), heldPrefix+h.ID)
-		s.record(ctx, t, c, h.Request.Method, u.Path, 0, "not allowed")
+		s.record(ctx, t, p, c, h.Request.Method, u.Path, 0, "not allowed")
 		audit(w, component.Audit{Action: "change", Target: c.Name + " " + h.Request.Method + " " + u.Path, Outcome: "deny"})
 		data["Heading"] = "Not made"
 		render(w, http.StatusOK, "callback", map[string]any{"Title": "Not made", "Heading": "Not made", "Text": "The change was not made. Your agent sees nothing changed."})
 		return
 	}
-	g, ok, err := s.grant(ctx, m.Subject, m.Org, c.Name)
+	g, ok, err := s.grantOf(ctx, p, m.Org, c.Name)
 	if err != nil || !ok {
 		_ = s.P.Delete(ctx, platform.Member(m.Subject), heldPrefix+h.ID)
 		s.callbackPage(w, http.StatusOK, "Not made", c.DisplayName+" is not connected any more: connect it, then ask your agent again.")
+		return
+	}
+	if p.Worker != nil && !g.canChange(c) {
+		s.callbackPage(w, http.StatusOK, "Not made", p.as()+" reaches "+c.DisplayName+" for reading only: its owners connect it for changes.")
 		return
 	}
 	if !g.canChange(c) {
@@ -337,7 +378,7 @@ func (s *Service) approvePage(w http.ResponseWriter, r *http.Request, m componen
 	}
 	_ = s.P.Delete(ctx, platform.Member(m.Subject), heldPrefix+h.ID)
 	s.signal(ctx, m.Org, c, h.Request.Method, u.Path, signalAllowed)
-	if form.Get("always") == "1" && g.Reach != connector.Write {
+	if form.Get("always") == "1" && g.Reach != connector.Write && p.Worker == nil {
 		g.Reach = connector.Write
 		if err := s.saveGrant(ctx, m.Subject, m.Org, g); err != nil {
 			slog.Warn("connections: reach not saved", "error", err)
@@ -350,20 +391,20 @@ func (s *Service) approvePage(w http.ResponseWriter, r *http.Request, m componen
 			s.callbackPage(w, http.StatusOK, "Not allowed", "The change could not be allowed right now: "+err.Error())
 			return
 		}
-		s.record(ctx, t, c, h.Request.Method, u.Path, 0, "allowed")
-		audit(w, component.Audit{Action: "change", Target: c.Name + " " + h.Request.Method + " " + u.Path, Outcome: "allow", Detail: "sent from the member's computer"})
+		s.record(ctx, t, p, c, h.Request.Method, u.Path, 0, "allowed")
+		audit(w, component.Audit{Action: "change", Target: c.Name + " " + h.Request.Method + " " + u.Path, Outcome: "allow", Detail: "sent from the member's computer" + asDetail(p)})
 		s.callbackPage(w, http.StatusOK, "Allowed", "Ask your agent again: its next try of this change goes through, from your computer (within an hour).")
 		return
 	}
-	resp, err := s.call(ctx, c, m.Org, m.Subject, &g, h.Request, u)
+	resp, err := s.call(ctx, c, m.Org, p, &g, h.Request, u)
 	if err != nil {
-		s.record(ctx, t, c, h.Request.Method, u.Path, 0, "failed")
-		audit(w, component.Audit{Action: "change", Target: c.Name + " " + h.Request.Method + " " + u.Path, Outcome: "failed"})
+		s.record(ctx, t, p, c, h.Request.Method, u.Path, 0, "failed")
+		audit(w, component.Audit{Action: "change", Target: c.Name + " " + h.Request.Method + " " + u.Path, Outcome: "failed", Detail: strings.TrimPrefix(asDetail(p), ", ")})
 		s.callbackPage(w, http.StatusOK, "Not made", c.DisplayName+" did not take the change: "+err.Error())
 		return
 	}
-	s.record(ctx, t, c, h.Request.Method, u.Path, resp.Status, "allowed")
-	audit(w, component.Audit{Action: "change", Target: c.Name + " " + h.Request.Method + " " + u.Path, Outcome: "allow", Detail: http.StatusText(resp.Status)})
+	s.record(ctx, t, p, c, h.Request.Method, u.Path, resp.Status, "allowed")
+	audit(w, component.Audit{Action: "change", Target: c.Name + " " + h.Request.Method + " " + u.Path, Outcome: "allow", Detail: http.StatusText(resp.Status) + asDetail(p)})
 	data["Heading"] = "Done"
 	data["Result"], data["ResultBody"] = resp, bodySummary(resp.Body)
 	render(w, http.StatusOK, "approve", data)

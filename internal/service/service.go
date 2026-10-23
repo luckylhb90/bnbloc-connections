@@ -37,12 +37,13 @@ type Service struct {
 	// (nil: a goroutine).
 	Later func(func())
 
-	mu        sync.Mutex
-	orgs      map[string]orgCache
-	tokens    map[grantKey]cachedAuth
-	locks     map[grantKey]*sync.Mutex
-	limiter   limiter
-	activityQ activityQueue
+	mu          sync.Mutex
+	orgs        map[string]orgCache
+	workerCache map[string]workerCache
+	tokens      map[grantKey]cachedAuth
+	locks       map[grantKey]*sync.Mutex
+	limiter     limiter
+	activityQ   activityQueue
 }
 
 type orgCache struct {

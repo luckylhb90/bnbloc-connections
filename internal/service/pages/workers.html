@@ -1,0 +1,39 @@
+{{define "body"}}
+<h1>Digital workers</h1>
+<p class="sub">Accounts of your organization that are not a person. An agent acts as one where its audience allows: for members who are not connected to a system, and for borrowed or platform agents, which never act as a person. The system sees the worker; every call names who asked.</p>
+{{if not .Workers}}<div class="card">{{if .Admin}}None yet. Add one below.{{else}}No digital worker serves your agents.{{end}}</div>{{end}}
+{{range .Workers}}{{$w := .}}
+<div class="card"><div class="row"><div><strong>{{.W.DisplayName}}</strong> <span class="muted">{{.W.ID}} · {{.W.Account}}</span>
+{{if .W.Purpose}}<div class="muted">{{.W.Purpose}}</div>{{end}}
+<div class="muted">Owners: {{if .Owners}}{{.Owners}}{{else}}none{{end}} · Members: {{if .Members}}{{.Members}}{{else}}none{{end}} · Agents: {{range $i, $d := .W.Drives}}{{if $i}}, {{end}}{{$d}}{{else}}none{{end}}</div></div>
+{{if $.Admin}}<div><form method="post" action="{{$.Base}}remove"><input type="hidden" name="id" value="{{.W.ID}}"><button class="danger">Remove</button></form></div>{{end}}</div>
+<table><tr><th>System</th><th>Connected</th><th>Changes</th>{{if .Manage}}<th></th>{{end}}</tr>
+{{range .Systems}}<tr><td>{{.C.DisplayName}}</td><td>{{if .Connected}}yes{{else}}no{{end}}</td><td>{{if .Connected}}{{if .Changes}}without asking{{else}}ask the person who asked{{end}}{{else}}-{{end}}</td>
+{{if $w.Manage}}<td>{{if .Connected}}
+<form method="post" action="{{$.Base}}reach"><input type="hidden" name="id" value="{{$w.W.ID}}"><input type="hidden" name="system" value="{{.C.Name}}">{{if .Changes}}<button name="reach" value="read">Ask for changes</button>{{else}}<button name="reach" value="write">Allow changes</button>{{end}}</form>
+<form method="post" action="{{$.Base}}disconnect"><input type="hidden" name="id" value="{{$w.W.ID}}"><input type="hidden" name="system" value="{{.C.Name}}"><button class="danger">Disconnect</button></form>
+{{else if .Supported}}<form method="post" action="{{$.Base}}connect"><input type="hidden" name="id" value="{{$w.W.ID}}"><input type="hidden" name="system" value="{{.C.Name}}"><button class="primary">Connect</button></form>
+{{else}}<span class="muted">not through a provider</span>{{end}}</td>{{end}}</tr>{{end}}
+</table>
+{{if .Calls}}<details><summary class="muted">Recent calls</summary><table><tr><th>When (UTC)</th><th>Asked by</th><th>System</th><th>Request</th><th>Result</th></tr>
+{{range .Calls}}<tr><td>{{.When}}</td><td>{{.Member}}</td><td>{{.Connector}}</td><td>{{.Method}} {{.Path}}</td><td>{{if .Status}}{{.Status}} {{end}}{{.Outcome}}</td></tr>{{end}}</table></details>{{end}}
+{{if $.Admin}}<details><summary class="muted">Edit</summary>{{template "workerform" .}}</details>{{end}}
+</div>
+{{end}}
+{{if .Admin}}
+<h2>Add a digital worker</h2>
+<div class="card">{{template "workerform" .Blank}}</div>
+{{end}}
+{{end}}
+{{define "workerform"}}<form class="block" method="post" action="{{.Base}}save">
+<label>Id</label><input type="text" name="id" value="{{.W.ID}}" required>
+<label>Name</label><input type="text" name="displayName" value="{{.W.DisplayName}}" required>
+<label>Purpose</label><input type="text" name="purpose" value="{{.W.Purpose}}">
+<label>Account (its name in the directory the providers sign in with)</label><input type="text" name="account" value="{{.W.Account}}" required>
+<label>Owners (member ids, comma-separated)</label><input type="text" name="owners" value="{{.Owners}}">
+<label>Members whose agents may act as it (member ids, or * for everyone)</label><input type="text" name="members" value="{{.Members}}">
+<label>Agents that may act as it</label>
+<label><input type="checkbox" name="drive" value="own"{{if .Drive.own}} checked{{end}}> the member's own</label>
+<label><input type="checkbox" name="drive" value="platform"{{if .Drive.platform}} checked{{end}}> the organization's platform agents</label>
+<label><input type="checkbox" name="drive" value="borrowed"{{if .Drive.borrowed}} checked{{end}}> an agent borrowed from a colleague</label>
+<p><button class="primary">Save</button></p></form>{{end}}

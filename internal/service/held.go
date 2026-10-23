@@ -26,11 +26,15 @@ type Held struct {
 	Job         string                  `json:"job"`
 	Request     component.EgressRequest `json:"request"`
 	CreatedAtMs int64                   `json:"createdAtMs"`
+	// As is the digital worker the change acts as ("": the member); Drive
+	// the turn's.
+	As    string `json:"as,omitempty"`
+	Drive string `json:"drive,omitempty"`
 }
 
-func (s *Service) hold(ctx context.Context, t component.Turn, c connector.Connector, in component.EgressRequest) (string, error) {
+func (s *Service) hold(ctx context.Context, t component.Turn, p principal, c connector.Connector, in component.EgressRequest) (string, error) {
 	id := randomToken(12)
-	h := Held{ID: id, Org: t.Org, Connector: c.Name, Room: t.Room, Job: t.Job, Request: in, CreatedAtMs: s.now().UnixMilli()}
+	h := Held{ID: id, Org: t.Org, Connector: c.Name, Room: t.Room, Job: t.Job, Request: in, CreatedAtMs: s.now().UnixMilli(), As: p.asID(), Drive: t.Drive}
 	return id, s.P.PutJSON(ctx, platform.Member(t.Requester), heldPrefix+id, h)
 }
 
