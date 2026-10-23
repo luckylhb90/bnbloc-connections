@@ -33,6 +33,9 @@ type Service struct {
 	// Upstream is the client of the connected systems (Guarded by default).
 	Upstream *http.Client
 	Now      func() time.Time
+	// Later runs the component's AI work off the request that started it
+	// (nil: a goroutine).
+	Later func(func())
 
 	mu      sync.Mutex
 	orgs    map[string]orgCache

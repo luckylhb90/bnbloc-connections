@@ -1,12 +1,12 @@
 {
   "kind": "bnbloc.service.package/v1",
   "name": "connections",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "publisher": "bnbloc",
-  "description": "Your own agents reach the systems you connected (a wiki, an issue tracker, a calendar), as you, with plain HTTPS: each request is authenticated on its way out, where the agent never sees the credential. Reads go through; a change asks you first unless you allowed changes for that system. Connectors are your organization's: an admin adds and enables them on the Connectors page.",
+  "description": "Your own agents reach the systems you connected (a wiki, an issue tracker, a calendar), as you, with plain HTTPS: each request is authenticated on its way out, where the agent never sees the credential. Reads go through; a change asks you first unless you allowed changes for that system. Connectors are your organization's: an admin adds and enables them on the Connectors page, where AI reviews each connector and proposes rules from how it is used.",
   "runtime": "endpoint",
   "contract": "bnbloc.service.contract/v1",
-  "capabilities": ["turnProxy", "egress", "roomFacts", "pages", "callbacks", "store"],
+  "capabilities": ["turnProxy", "egress", "roomFacts", "pages", "callbacks", "store", "assist"],
   "permissions": {
     "network": ["connections"]
   },

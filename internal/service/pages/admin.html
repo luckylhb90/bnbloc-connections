@@ -1,3 +1,10 @@
+{{define "review"}}<div class="ai"><div class="muted">AI review{{if .Pending}}: reviewing…{{end}}</div>
+{{if .Error}}<div class="muted">{{.Error}}</div>{{end}}
+{{if .Summary}}<div>{{.Summary}}</div>{{end}}
+{{if .Reads}}<div class="muted">Reads without asking:</div><ul>{{range .Reads}}<li>{{.}}</li>{{end}}</ul>{{end}}
+{{if .Changes}}<div class="muted">Changes, after the member allows them:</div><ul>{{range .Changes}}<li>{{.}}</li>{{end}}</ul>{{end}}
+{{if .Findings}}<div class="muted">Findings:</div><ul>{{range .Findings}}<li><span class="sev-{{.Severity}}">{{.Severity}}</span>{{if .About}} · {{.About}}{{end}}: {{.Why}}</li>{{end}}</ul>{{else}}{{if .Summary}}<div class="muted">No findings.</div>{{end}}{{end}}
+</div>{{end}}
 {{define "body"}}
 <h1>Connectors</h1>
 <p class="sub">The systems members of your organization may connect. A connector names its hosts, how one connects and which requests read or change. Enabled ones are offered to members; their agents reach them as each member.</p>
@@ -6,6 +13,8 @@
 {{range .Drafts}}
 <div class="card"><div class="row"><div><strong>{{.Connector.DisplayName}}</strong> <span class="pill">draft</span><div class="muted">by {{.DraftedBy}} · {{range $i, $h := .Connector.Hosts}}{{if $i}}, {{end}}{{$h}}{{end}}</div></div>
 <div><form method="post" action="{{$.Base}}draft"><input type="hidden" name="name" value="{{.Connector.Name}}"><button class="primary" name="decision" value="accept">Add (disabled)</button> <button name="decision" value="discard">Discard</button></form></div></div>
+{{template "review" .Review}}
+<form method="post" action="{{$.Base}}review"><input type="hidden" name="name" value="{{.Connector.Name}}"><input type="hidden" name="draft" value="1"><button>Review again</button></form>
 <details><summary class="muted">JSON</summary><pre>{{.JSON}}</pre></details></div>
 {{end}}
 {{end}}
@@ -16,9 +25,19 @@
 <div class="muted">{{.C.Name}} · {{.C.Connect.Kind}} · {{range $i, $h := .C.Hosts}}{{if $i}}, {{end}}{{$h}}{{end}}</div>
 <div class="muted">Requests go out from: {{if .C.FromMember}}each member's computer{{else}}this service{{end}}</div>
 <div class="muted">Client secret: {{if .HasClientSecret}}set{{else}}not set{{end}} · Provider secret: {{if .HasProviderSecret}}set{{else}}not set{{end}}</div></div>
-<div><form method="post" action="{{$.Base}}toggle"><input type="hidden" name="name" value="{{.C.Name}}">{{if .C.Enabled}}<button name="enabled" value="0">Disable</button>{{else}}<button class="primary" name="enabled" value="1">Enable</button>{{end}}</form>
+<div><form method="post" action="{{$.Base}}toggle"><input type="hidden" name="name" value="{{.C.Name}}">{{if .C.Enabled}}<button name="enabled" value="0">Disable</button>{{else}}<button class="primary" name="enabled" value="1">{{if .Review.High}}Enable ({{.Review.High}} high finding{{if gt .Review.High 1}}s{{end}}){{else}}Enable{{end}}</button>{{end}}</form>
 <form method="post" action="{{$.Base}}sendfrom"><input type="hidden" name="name" value="{{.C.Name}}">{{if .C.FromMember}}<button name="sendFrom" value="server">Send from this service</button>{{else}}<button name="sendFrom" value="member">Send from members' computers</button>{{end}}</form>
 <form method="post" action="{{$.Base}}delete"><input type="hidden" name="name" value="{{.C.Name}}"><button class="danger">Remove</button></form></div></div>
+{{template "review" .Review}}
+<form method="post" action="{{$.Base}}review"><input type="hidden" name="name" value="{{.C.Name}}"><button>Review again</button></form>
+{{if or .Refused .Allowed .Proposal.Rules .Proposal.Pending .Proposal.Error}}<div class="ai"><div class="muted">From use: {{.Refused}} refused request{{if ne .Refused 1}}s{{end}} no rule classifies, {{.Allowed}} allowed change{{if ne .Allowed 1}}s{{end}}{{if .Proposal.Pending}} · suggesting rules…{{end}}</div>
+{{if .Proposal.Error}}<div class="muted">{{.Proposal.Error}}</div>{{end}}
+{{if .Proposal.Notes}}<div>{{.Proposal.Notes}}</div>{{end}}
+{{$name := .C.Name}}{{range .Proposal.Rules}}<div class="row"><div><strong>{{.Method}} {{.Path}}</strong> → {{if eq .Class "read"}}a read{{else}}a change{{end}} <span class="muted">({{.Matches}} seen)</span><div class="muted">{{.Why}}{{if eq .Class "read"}} Agents then call it without asking.{{end}}</div></div>
+<div><form method="post" action="{{$.Base}}addrule"><input type="hidden" name="name" value="{{$name}}"><input type="hidden" name="id" value="{{.ID}}"><button class="primary">Add</button></form>
+<form method="post" action="{{$.Base}}dismissrule"><input type="hidden" name="name" value="{{$name}}"><input type="hidden" name="id" value="{{.ID}}"><button>Dismiss</button></form></div></div>{{end}}
+{{if or .Refused .Allowed}}<form method="post" action="{{$.Base}}propose"><input type="hidden" name="name" value="{{.C.Name}}"><button>Suggest rules</button></form>{{end}}
+</div>{{end}}
 <details><summary class="muted">Edit</summary>
 <form class="block" method="post" action="{{$.Base}}save"><textarea name="json" spellcheck="false">{{.JSON}}</textarea><p><button>Save</button></p></form>
 <form class="block" method="post" action="{{$.Base}}secrets"><input type="hidden" name="name" value="{{.C.Name}}">

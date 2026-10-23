@@ -293,6 +293,7 @@ func (s *Service) approvePage(w http.ResponseWriter, r *http.Request, m componen
 		s.callbackPage(w, http.StatusOK, "Not made", c.DisplayName+" is not connected any more: connect it, then ask your agent again.")
 		return
 	}
+	s.signal(ctx, m.Org, c, h.Request.Method, u.Path, signalAllowed)
 	if form.Get("always") == "1" && g.Reach != connector.Write {
 		g.Reach = connector.Write
 		if err := s.saveGrant(ctx, m.Subject, m.Org, g); err != nil {
@@ -330,11 +331,15 @@ type adminRow struct {
 	JSON              string
 	HasClientSecret   bool
 	HasProviderSecret bool
+	Review            Review
+	Proposal          Proposal
+	Refused, Allowed  int
 }
 
 type draftRow struct {
 	Draft
-	JSON string
+	JSON   string
+	Review Review
 }
 
 func pretty(v any) string {
@@ -402,6 +407,7 @@ func (s *Service) adminPage(w http.ResponseWriter, r *http.Request, m component.
 		if action == "delete" {
 			defer s.forget(m.Org)
 			_ = s.P.Delete(ctx, org, secretsPrefix+name)
+			s.forgetAI(ctx, m.Org, name)
 			if err := s.P.Delete(ctx, org, connectorPrefix+name); err != nil {
 				back(w, m, "Not removed: "+err.Error(), true)
 				return
@@ -442,6 +448,8 @@ func (s *Service) adminPage(w http.ResponseWriter, r *http.Request, m component.
 			return
 		}
 		_ = s.P.Delete(ctx, org, draftPrefix+name)
+		dr := s.review(ctx, m.Org, name, true)
+		_ = s.P.Delete(ctx, org, reviewKey(name, true))
 		if form.Get("decision") != "accept" {
 			back(w, m, "Draft discarded.", false)
 			return
@@ -451,8 +459,53 @@ func (s *Service) adminPage(w http.ResponseWriter, r *http.Request, m component.
 			back(w, m, "Not added: "+err.Error(), true)
 			return
 		}
+		if dr.Hash == reviewHash(d.Connector) && !dr.Pending {
+			_ = s.P.PutJSON(ctx, org, reviewKey(name, false), dr)
+		}
 		audit(w, component.Audit{Action: "connector-save", Target: name, Outcome: "ok", Detail: "from a draft by " + d.DraftedBy})
 		back(w, m, d.Connector.DisplayName+" added, disabled: set its client values and enable it.", false)
+		return
+	case "review":
+		name := form.Get("name")
+		draft := form.Get("draft") == "1"
+		var c connector.Connector
+		found := false
+		if draft {
+			var d Draft
+			found, _ = s.P.GetJSON(ctx, org, draftPrefix+name, &d)
+			c = d.Connector
+		} else {
+			found, _ = s.P.GetJSON(ctx, org, connectorPrefix+name, &c)
+		}
+		if !found {
+			back(w, m, "No such connector.", true)
+			return
+		}
+		s.ensureReview(ctx, m.Org, m.Subject, c, draft, true)
+		back(w, m, "Reviewing "+c.DisplayName+"…", false)
+		return
+	case "propose":
+		name := form.Get("name")
+		var c connector.Connector
+		if found, err := s.P.GetJSON(ctx, org, connectorPrefix+name, &c); err != nil || !found {
+			back(w, m, "No such connector.", true)
+			return
+		}
+		s.startProposal(ctx, m.Org, m.Subject, c)
+		back(w, m, "Looking at how "+c.DisplayName+" is used…", false)
+		return
+	case "addrule":
+		c, r, err := s.addProposedRule(ctx, m.Org, form.Get("name"), form.Get("id"))
+		if err != nil {
+			back(w, m, "Not added: "+err.Error(), true)
+			return
+		}
+		audit(w, component.Audit{Action: "connector-rule-add", Target: c.Name, Outcome: "ok", Detail: r.Class + " " + r.Method + " " + r.Path + " (suggested)"})
+		back(w, m, c.DisplayName+": "+r.Method+" "+r.Path+" is now "+map[bool]string{true: "a read", false: "a change"}[r.Class == connector.Read]+".", false)
+		return
+	case "dismissrule":
+		s.dismissProposedRule(ctx, m.Org, form.Get("name"), form.Get("id"))
+		back(w, m, "Suggestion dismissed.", false)
 		return
 	default:
 		s.callbackPage(w, http.StatusNotFound, "Not found", "This page does not exist.")
@@ -464,14 +517,27 @@ func (s *Service) adminPage(w http.ResponseWriter, r *http.Request, m component.
 		return
 	}
 	rows := make([]adminRow, 0, len(list))
+	pending := false
 	for _, c := range list {
 		sec := s.secrets(ctx, m.Org, c.Name)
-		rows = append(rows, adminRow{C: c, JSON: pretty(c), HasClientSecret: sec.ClientSecret != "", HasProviderSecret: sec.ProviderSecret != ""})
+		row := adminRow{C: c, JSON: pretty(c), HasClientSecret: sec.ClientSecret != "", HasProviderSecret: sec.ProviderSecret != "",
+			Review: s.ensureReview(ctx, m.Org, m.Subject, c, false, false), Proposal: s.proposal(ctx, m.Org, c.Name)}
+		for _, sig := range s.signals(ctx, m.Org, c.Name) {
+			if sig.Outcome == signalRefused {
+				row.Refused += sig.Count
+			} else {
+				row.Allowed += sig.Count
+			}
+		}
+		pending = pending || row.Review.Pending || row.Proposal.Pending
+		rows = append(rows, row)
 	}
 	var drafts []draftRow
 	for _, d := range s.drafts(ctx, m.Org) {
-		drafts = append(drafts, draftRow{Draft: d, JSON: pretty(d.Connector)})
+		row := draftRow{Draft: d, JSON: pretty(d.Connector), Review: s.ensureReview(ctx, m.Org, m.Subject, d.Connector, true, false)}
+		pending = pending || row.Review.Pending
+		drafts = append(drafts, row)
 	}
 	q := r.URL.Query()
-	render(w, http.StatusOK, "admin", map[string]any{"Title": "Connectors", "Connectors": rows, "Drafts": drafts, "Base": m.PageURL, "Msg": q.Get("msg"), "Err": q.Get("err") != ""})
+	render(w, http.StatusOK, "admin", map[string]any{"Title": "Connectors", "Connectors": rows, "Drafts": drafts, "Base": m.PageURL, "Msg": q.Get("msg"), "Err": q.Get("err") != "", "Refresh": pending})
 }

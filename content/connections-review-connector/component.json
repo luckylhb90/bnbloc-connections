@@ -1,0 +1,26 @@
+{
+  "kind": "bnbloc.assist.package/v1",
+  "name": "connections-review-connector",
+  "version": "1.0.0",
+  "displayName": "Review a connector",
+  "description": "Reviews a connections connector for the administrator about to enable it: what agents can do with it, and what in its rules looks wrong.",
+  "category": "authoring",
+  "tags": ["assist", "connections"],
+  "icon": "sparkle",
+  "output": "json",
+  "fields": [
+    { "name": "summary", "description": "One sentence: what agents can do with this connector once enabled" },
+    { "name": "reads", "type": "list", "description": "What agents read without asking, in plain words, one item per kind of data" },
+    { "name": "changes", "type": "list", "description": "What agents change only after the member allows it, in plain words" },
+    {
+      "name": "findings",
+      "type": "items",
+      "description": "Problems in the connector's rules, hosts, scopes or guide, most severe first",
+      "item": [
+        { "name": "severity", "description": "high, medium or low" },
+        { "name": "about", "description": "What it is about: a rule, a host, a scope, the guide" },
+        { "name": "why", "description": "What is wrong and what it lets happen, in one or two sentences" }
+      ]
+    }
+  ]
+}

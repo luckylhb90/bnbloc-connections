@@ -102,6 +102,7 @@ func (s *Service) selfAPI(ctx context.Context, t component.Turn, in component.Eg
 		if err := s.P.PutJSON(ctx, platform.Org(t.Org), draftPrefix+c.Name, d); err != nil {
 			return refusal(http.StatusBadGateway, "the draft could not be kept: "+err.Error(), nil, nil)
 		}
+		s.ensureReview(ctx, t.Org, t.Requester, c, true, true)
 		return jsonAnswer(http.StatusCreated, map[string]string{
 			"status":  "draft saved",
 			"message": "An admin of the organization reviews it on the Connectors page (Components) and enables it or not. Tell " + t.Requester + " it waits there.",

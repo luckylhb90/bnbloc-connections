@@ -120,6 +120,38 @@ Connected systems are reached with redirects never followed and never at
 loopback, link-local (cloud metadata) or unspecified addresses; an
 organization's private addresses are allowed.
 
+## AI for the admin
+
+The component's own AI helps the admin decide; it never sits in a
+request's path and never reaches an agent
+(`docs/prd/2026-10-23-connections-ai.md` in bnbloc).
+
+- **A review of every connector**, shown beside it on the Connectors
+  page: one sentence on what agents can do with it, what they read
+  without asking, what they change after the member allows it, and
+  findings ranked high, medium or low (a read rule that matches a
+  deleting request, a host that is not the system's, a credential in the
+  guide, …). It runs when a connector or an agent's draft changes and on
+  "Review again"; a high finding shows on the Enable button.
+- **Rules proposed from use**: requests no rule classifies and changes
+  members allowed are counted per connector (method and path only). A new
+  refused shape, or a change allowed three times, proposes rules (at most
+  once an hour per connector; "Suggest rules" asks again). Add puts a
+  rule in the policy; Dismiss drops it. A proposed rule must classify a
+  request seen.
+
+Both run through bnbloc's `assist` primitive for services, on the
+organization's assist model. The prompts are content in `content/`:
+publish them at platform scope once per deployment (an organization may
+publish its own of the same name):
+
+```sh
+bnbloc content publish --all content --rollout auto
+```
+
+Without the `assist` capability, a model or the tasks, the page shows the
+connectors without the AI part and says why.
+
 ## Provider contract
 
 `github.com/luckylhb90/bnbloc-connections/provider`: `POST {url}/connect`,

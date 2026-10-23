@@ -114,6 +114,7 @@ func (s *Service) serve(ctx context.Context, t component.Turn, in component.Egre
 	switch {
 	case class == "":
 		s.record(ctx, t, c, in.Method, u.Path, 0, "refused")
+		s.signal(ctx, t.Org, c, in.Method, u.Path, signalRefused)
 		return refusal(http.StatusForbidden, in.Method+" "+u.Path+" is not a request the "+c.DisplayName+" connector allows", nil, nil),
 			&component.Audit{Action: "request", Target: c.Name + " " + target, Outcome: "deny", Detail: "policy"}
 	case class == connector.Write && g.Reach != connector.Write && in.Report == nil && !s.takeAllowance(ctx, t, c, in):

@@ -1,0 +1,25 @@
+{
+  "kind": "bnbloc.assist.package/v1",
+  "name": "connections-propose-rules",
+  "version": "1.0.0",
+  "displayName": "Propose connector rules",
+  "description": "Proposes rules for a connections connector from the requests its policy refused and the changes members allowed, for an administrator to add or dismiss.",
+  "category": "authoring",
+  "tags": ["assist", "connections"],
+  "icon": "sparkle",
+  "output": "json",
+  "fields": [
+    {
+      "name": "rules",
+      "type": "items",
+      "description": "Rules to add, each classifying requests seen",
+      "item": [
+        { "name": "class", "description": "read or write" },
+        { "name": "method", "description": "One HTTP method" },
+        { "name": "path", "description": "A path glob: * is one segment, ** any number" },
+        { "name": "why", "description": "Why this request reads or changes, in one sentence" }
+      ]
+    },
+    { "name": "notes", "description": "One or two sentences on what you left out and why; empty when nothing" }
+  ]
+}

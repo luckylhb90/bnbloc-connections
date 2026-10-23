@@ -28,6 +28,15 @@ const testSecret = "whsec_test"
 type fakeStore struct {
 	mu   sync.Mutex
 	vals map[string][]byte
+	// assist answers the component's AI runs (nil: no model, 409); runs
+	// records them.
+	assist func(task string, req component.AssistRequest) map[string]any
+	runs   []assistRun
+}
+
+type assistRun struct {
+	task string
+	req  component.AssistRequest
 }
 
 func newFakeStore(t *testing.T) (*fakeStore, *httptest.Server) {
@@ -43,9 +52,21 @@ func newFakeStore(t *testing.T) (*fakeStore, *httptest.Server) {
 			w.WriteHeader(http.StatusUnauthorized)
 			return
 		}
-		key := strings.TrimPrefix(r.URL.Path, component.ComponentStorePath)
 		st.mu.Lock()
 		defer st.mu.Unlock()
+		if task, ok := strings.CutPrefix(r.URL.Path, component.ComponentAssistPath); ok {
+			var req component.AssistRequest
+			_ = json.Unmarshal(body, &req)
+			st.runs = append(st.runs, assistRun{task, req})
+			if st.assist == nil {
+				w.WriteHeader(http.StatusConflict)
+				_, _ = w.Write([]byte(`{"error":"no assist model"}`))
+				return
+			}
+			_ = json.NewEncoder(w).Encode(component.AssistReply{Fields: st.assist(task, req)})
+			return
+		}
+		key := strings.TrimPrefix(r.URL.Path, component.ComponentStorePath)
 		switch {
 		case r.Method == http.MethodGet && strings.HasSuffix(key, "/"):
 			keys := []string{}
@@ -132,7 +153,7 @@ func newFixture(t *testing.T) *fixture {
 		},
 		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
 	}
-	fx.svc = &Service{P: platform.New(storeSrv.URL, "connections", testSecret), Upstream: client}
+	fx.svc = &Service{P: platform.New(storeSrv.URL, "connections", testSecret), Upstream: client, Later: func(f func()) { f() }}
 	fx.h = fx.svc.Handler()
 	return fx
 }
