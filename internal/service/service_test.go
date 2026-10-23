@@ -465,6 +465,7 @@ func (fx *fixture) idpAnswer(w http.ResponseWriter, _ *http.Request, body []byte
 	case form.Get("grant_type") == "authorization_code" && form.Get("code") == "CODE-1":
 		_, _ = io.WriteString(w, `{"access_token":"access-1","refresh_token":"refresh-1","expires_in":3600}`)
 	case form.Get("grant_type") == "refresh_token" && form.Get("refresh_token") == "refresh-1":
+		time.Sleep(20 * time.Millisecond) // long enough for concurrent requests to overlap
 		_, _ = io.WriteString(w, `{"access_token":"access-2","refresh_token":"refresh-2","expires_in":3600}`)
 	default:
 		w.WriteHeader(http.StatusBadRequest)

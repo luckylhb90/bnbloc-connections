@@ -39,7 +39,11 @@ type Connector struct {
 	Policy      Policy            `json:"policy"`
 	ExpiredWhen []Expired         `json:"expiredWhen,omitempty"`
 	CLIEnv      map[string]string `json:"cliEnv,omitempty"`
-	Guide       string            `json:"guide,omitempty"`
+	// Answers are requests the component answers itself, never sending
+	// them: a CLI's own sign-in step whose credential the component holds
+	// (it exchanges the key itself, APIKey.Exchange).
+	Answers []Answer `json:"answers,omitempty"`
+	Guide   string   `json:"guide,omitempty"`
 	// SendFrom is where a request to the system goes out: SendServer (this
 	// component's network, the default) or SendMember (the member's own
 	// computer, through their bridge: a system the component's network does
@@ -100,6 +104,56 @@ type APIKey struct {
 	Prefix string `json:"prefix,omitempty"`
 	// Help tells the member where to make one.
 	Help string `json:"help,omitempty"`
+	// Exchange: the key is not sent to the system as is; the component
+	// trades it for a short-lived token first and sends that.
+	Exchange *Exchange `json:"exchange,omitempty"`
+}
+
+// Exchange trades a member's key for a short-lived token at one of the
+// connector's hosts: a POST of Body (JSON, or a form) where "{{key}}"
+// stands for the key, the token read at Token (a dotted path in the JSON
+// answer) and carried as In/Name/Prefix say (like an APIKey's), kept
+// until ExpiresIn (a dotted path to seconds) or TTLSeconds (default 1800)
+// runs out.
+type Exchange struct {
+	URL        string            `json:"url"`
+	Body       map[string]string `json:"body"`
+	Form       bool              `json:"form,omitempty"`
+	Token      string            `json:"token"`
+	ExpiresIn  string            `json:"expiresIn,omitempty"`
+	TTLSeconds int               `json:"ttlSeconds,omitempty"`
+	In         string            `json:"in"`
+	Name       string            `json:"name,omitempty"`
+	Prefix     string            `json:"prefix,omitempty"`
+}
+
+// Answer is one request the component answers itself: its method and path
+// glob, and the status, content type and body it answers.
+type Answer struct {
+	Method      string `json:"method"`
+	Path        string `json:"path"`
+	Status      int    `json:"status,omitempty"`
+	ContentType string `json:"contentType,omitempty"`
+	Body        string `json:"body"`
+}
+
+// MaxAnswerBody bounds an Answer's body.
+const MaxAnswerBody = 16 << 10
+
+// Answering is the answer c gives a request itself (ok false: none).
+func (c Connector) Answering(method, path string) (Answer, bool) {
+	for _, a := range c.Answers {
+		if a.Method == method && Glob(a.Path, path) {
+			if a.Status == 0 {
+				a.Status = 200
+			}
+			if a.ContentType == "" {
+				a.ContentType = "application/json"
+			}
+			return a, true
+		}
+	}
+	return Answer{}, false
 }
 
 // Provider is another component that connects the member and authorizes
@@ -203,7 +257,31 @@ func (c Connector) Validate() error {
 	if len(c.Guide) > MaxGuide {
 		return fmt.Errorf("guide: at most %d bytes", MaxGuide)
 	}
+	for _, a := range c.Answers {
+		if !slices.Contains(methods, a.Method) || !strings.HasPrefix(a.Path, "/") {
+			return fmt.Errorf("answers: %s %s: a method and a path starting with /", a.Method, a.Path)
+		}
+		if a.Status != 0 && (a.Status < 200 || a.Status > 599) || len(a.Body) > MaxAnswerBody || strings.ContainsAny(a.ContentType, "\r\n") {
+			return fmt.Errorf("answers: %s %s: a status of 200 to 599, a body of at most %d bytes", a.Method, a.Path, MaxAnswerBody)
+		}
+	}
+	if x := c.exchange(); x != nil {
+		u, err := url.Parse(x.URL)
+		if err != nil || u.Scheme != "https" || !c.Handles(u.Hostname()) || u.Port() != "" {
+			return errors.New("apiKey.exchange.url: an https URL on one of the connector's hosts")
+		}
+		if c.FromMember() {
+			return errors.New(`apiKey.exchange: the component exchanges the key itself, so its requests go out from the server (sendFrom "server")`)
+		}
+	}
 	return nil
+}
+
+func (c Connector) exchange() *Exchange {
+	if c.Connect.APIKey == nil {
+		return nil
+	}
+	return c.Connect.APIKey.Exchange
 }
 
 func envName(k string) bool {
@@ -250,14 +328,23 @@ func (c Connect) validate() error {
 		if a == nil {
 			return errors.New("kind apiKey needs apiKey")
 		}
-		switch a.In {
-		case "bearer", "basic":
-		case "header", "query":
-			if strings.TrimSpace(a.Name) == "" {
-				return fmt.Errorf("apiKey in %s needs a name", a.In)
+		if err := carried(a.In, a.Name, true); err != nil {
+			return fmt.Errorf("apiKey: %w", err)
+		}
+		if x := a.Exchange; x != nil {
+			if err := carried(x.In, x.Name, false); err != nil {
+				return fmt.Errorf("apiKey.exchange: %w", err)
 			}
-		default:
-			return errors.New(`apiKey.in: "bearer", "header", "query" or "basic"`)
+			if strings.TrimSpace(x.Token) == "" || len(x.Body) == 0 || x.TTLSeconds < 0 {
+				return errors.New("apiKey.exchange: a body with {{key}}, the token's path, a TTL of 0 or more seconds")
+			}
+			has := false
+			for _, v := range x.Body {
+				has = has || strings.Contains(v, "{{key}}")
+			}
+			if !has {
+				return errors.New("apiKey.exchange.body: a value holds {{key}}")
+			}
 		}
 	case KindProvider:
 		p := c.Provider
@@ -270,6 +357,25 @@ func (c Connect) validate() error {
 		}
 	default:
 		return errors.New(`kind: "oauth2", "apiKey" or "provider"`)
+	}
+	return nil
+}
+
+// carried checks how a credential is carried: "bearer", "header" or
+// "query" with a name, and "basic" when the key may be one.
+func carried(in, name string, basic bool) error {
+	switch in {
+	case "bearer":
+	case "basic":
+		if !basic {
+			return errors.New(`in: "bearer", "header" or "query"`)
+		}
+	case "header", "query":
+		if strings.TrimSpace(name) == "" {
+			return fmt.Errorf("in %s needs a name", in)
+		}
+	default:
+		return errors.New(`in: "bearer", "header", "query" or "basic"`)
 	}
 	return nil
 }
@@ -347,6 +453,32 @@ func (Policy) matches(rules []Rule, defaults []string, method, path string, body
 		return true
 	}
 	return false
+}
+
+// ErrAmbiguousPath is a path a server may read otherwise than the policy.
+var ErrAmbiguousPath = errors.New("a path with a . or .. segment, an encoded slash or a backslash is refused: send the path as the system names it")
+
+// CheckPath refuses a request path whose meaning a server may read
+// differently from how the policy reads it, so the path a rule matched is
+// the path the system serves: a "." or ".." segment, also percent-encoded
+// once or twice or before a ";" (a path parameter some servers strip), an
+// encoded slash, or a backslash.
+func CheckPath(u *url.URL) error {
+	for _, seg := range strings.Split(u.EscapedPath(), "/") {
+		once, err := url.PathUnescape(seg)
+		if err != nil || ambiguous(once) {
+			return ErrAmbiguousPath
+		}
+		if twice, err := url.PathUnescape(once); err == nil && ambiguous(twice) {
+			return ErrAmbiguousPath
+		}
+	}
+	return nil
+}
+
+func ambiguous(seg string) bool {
+	name, _, _ := strings.Cut(seg, ";")
+	return name == "." || name == ".." || strings.ContainsAny(seg, "/\\")
 }
 
 // Glob matches a path against a pattern: "*" is one segment, "**" any

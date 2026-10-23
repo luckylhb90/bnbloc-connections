@@ -1,6 +1,9 @@
 package connector
 
-import "testing"
+import (
+	"net/url"
+	"testing"
+)
 
 func sample() Connector {
 	return Connector{
@@ -74,6 +77,29 @@ func TestGlob(t *testing.T) {
 	} {
 		if Glob(tc.p, tc.s) != tc.ok {
 			t.Errorf("Glob(%q, %q) = %v", tc.p, tc.s, !tc.ok)
+		}
+	}
+}
+
+// A path a server may read otherwise than the policy is refused, in every
+// encoding; plain paths, encoded spaces and ids pass.
+func TestCheckPathRefusesAmbiguousPaths(t *testing.T) {
+	for _, p := range []string{
+		"/api/../admin/users", "/api/./x", "/api/%2e%2e/admin", "/api/%2E%2E/admin", "/api/.%2e/admin", "/api/%252e%252e/admin",
+		"/api/..;/admin", "/api/%2e%2e;x/admin", "/api/a%2fb", "/api/a%2Fb", "/api/a%252fb", "/api/a%5cb", "/api/a\\b", "/api/%5c..%5cadmin",
+	} {
+		u, err := url.Parse("https://example.com" + p)
+		if err != nil {
+			continue // not even a URL: refused before the policy
+		}
+		if CheckPath(u) == nil {
+			t.Errorf("%s passed", p)
+		}
+	}
+	for _, p := range []string{"/api/issue/1", "/api/search%20this", "/wiki/A%20page;v=2", "/api/...", "/api/.hidden", "/"} {
+		u, _ := url.Parse("https://example.com" + p)
+		if err := CheckPath(u); err != nil {
+			t.Errorf("%s refused: %v", p, err)
 		}
 	}
 }

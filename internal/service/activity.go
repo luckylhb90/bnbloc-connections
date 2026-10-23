@@ -27,23 +27,64 @@ type Call struct {
 // maxActivity bounds the calls kept per member and organization.
 const maxActivity = 100
 
-var activityMu sync.Mutex
+// activityKey is one member's activity in one organization.
+type activityKey struct{ member, org string }
+
+// activityQueue holds calls not yet written: a request only queues its
+// call, and one writer per member and organization appends what queued
+// (read once, written once), off every request's path. The component runs
+// as one replica, so its writes do not race another's.
+type activityQueue struct {
+	mu      sync.Mutex
+	pending map[activityKey][]Call
+	writing map[activityKey]bool
+}
 
 // record keeps one call in the member's activity (best-effort).
 func (s *Service) record(ctx context.Context, t component.Turn, c connector.Connector, method, path string, status int, outcome string) {
-	activityMu.Lock()
-	defer activityMu.Unlock()
-	key := activityPrefix + t.Org
-	var list []Call
-	if _, err := s.P.GetJSON(ctx, platform.Member(t.Requester), key, &list); err != nil {
-		slog.Warn("connections: activity unreadable", "error", err)
+	k := activityKey{t.Requester, t.Org}
+	call := Call{AtMs: s.now().UnixMilli(), Room: t.Room, Connector: c.Name, Method: method, Path: clip(path, 200), Status: status, Outcome: outcome}
+	q := &s.activityQ
+	q.mu.Lock()
+	if q.pending == nil {
+		q.pending, q.writing = map[activityKey][]Call{}, map[activityKey]bool{}
 	}
-	list = append(list, Call{AtMs: s.now().UnixMilli(), Room: t.Room, Connector: c.Name, Method: method, Path: clip(path, 200), Status: status, Outcome: outcome})
-	if len(list) > maxActivity {
-		list = list[len(list)-maxActivity:]
+	q.pending[k] = append(q.pending[k], call)
+	start := !q.writing[k]
+	q.writing[k] = true
+	q.mu.Unlock()
+	if start {
+		s.later(func() { s.writeActivity(k) })
 	}
-	if err := s.P.PutJSON(ctx, platform.Member(t.Requester), key, list); err != nil {
-		slog.Warn("connections: activity not kept", "error", err)
+}
+
+// writeActivity appends what queued for k until nothing does.
+func (s *Service) writeActivity(k activityKey) {
+	q := &s.activityQ
+	for {
+		q.mu.Lock()
+		calls := q.pending[k]
+		delete(q.pending, k)
+		if len(calls) == 0 {
+			delete(q.writing, k)
+			q.mu.Unlock()
+			return
+		}
+		q.mu.Unlock()
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		key := activityPrefix + k.org
+		var list []Call
+		if _, err := s.P.GetJSON(ctx, platform.Member(k.member), key, &list); err != nil {
+			slog.Warn("connections: activity unreadable", "error", err)
+		}
+		list = append(list, calls...)
+		if len(list) > maxActivity {
+			list = list[len(list)-maxActivity:]
+		}
+		if err := s.P.PutJSON(ctx, platform.Member(k.member), key, list); err != nil {
+			slog.Warn("connections: activity not kept", "error", err)
+		}
+		cancel()
 	}
 }
 

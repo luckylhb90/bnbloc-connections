@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"sync"
 	"time"
 
 	"github.com/luckylhb90/bnbloc-connections/connector"
@@ -20,13 +21,25 @@ type Grant struct {
 	Connector string `json:"connector"`
 	// Reach: connector.Read, or connector.Write (changes allowed without
 	// asking each time).
-	Reach         string `json:"reach"`
+	Reach string `json:"reach"`
+	// Scopes: connector.Write when an OAuth sign-in granted the write
+	// scopes too (a change can be made), else the read ones only.
+	Scopes        string `json:"scopes,omitempty"`
 	RefreshToken  string `json:"refreshToken,omitempty"`
 	AccessToken   string `json:"accessToken,omitempty"`
 	ExpiresAtMs   int64  `json:"expiresAtMs,omitempty"`
 	APIKey        string `json:"apiKey,omitempty"`
 	ProviderGrant string `json:"providerGrant,omitempty"`
 	ConnectedAtMs int64  `json:"connectedAtMs"`
+}
+
+// canChange reports whether the grant's credentials can make a change in
+// c: always, except an OAuth sign-in that did not grant c's write scopes.
+func (g Grant) canChange(c connector.Connector) bool {
+	if c.Connect.Kind != connector.KindOAuth2 || len(c.Connect.OAuth2.Scopes.Write) == 0 {
+		return true
+	}
+	return g.Scopes == connector.Write
 }
 
 type grantKey struct{ member, org, connector string }
@@ -53,6 +66,7 @@ type cachedAuth struct {
 	header http.Header
 	query  url.Values
 	until  time.Time
+	at     time.Time
 }
 
 func (s *Service) cachedAuthFor(k grantKey) (cachedAuth, bool) {
@@ -80,23 +94,56 @@ func (s *Service) dropAuth(k grantKey) {
 	s.mu.Unlock()
 }
 
+// grantLock serializes making one grant's credentials in this process, so
+// two requests never spend one refresh token twice (a provider that
+// detects reuse revokes the grant). Replicas do not share it: the
+// component runs as one replica.
+func (s *Service) grantLock(k grantKey) *sync.Mutex {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.locks == nil {
+		s.locks = map[grantKey]*sync.Mutex{}
+	}
+	if s.locks[k] == nil {
+		s.locks[k] = &sync.Mutex{}
+	}
+	return s.locks[k]
+}
+
 // errReconnect: the grant no longer works; the member connects again.
 var errReconnect = errors.New("the connection no longer works")
 
 // credentials are what a request to c carries for the member: from memory
 // while they last, else made from the grant (an OAuth refresh, the key, the
-// provider's authorization). force skips the memory (after a refusal).
+// provider's authorization). force skips the memory (after a refusal),
+// unless another request made them meanwhile. One grant's are made one at
+// a time (grantLock), from the grant as stored then (a refresh token
+// another request rotated).
 func (s *Service) credentials(ctx context.Context, c connector.Connector, org, member string, g *Grant, force bool) (cachedAuth, error) {
 	k := grantKey{member, org, c.Name}
+	start := s.now()
 	if !force {
 		if a, ok := s.cachedAuthFor(k); ok {
 			return a, nil
 		}
 	}
+	mu := s.grantLock(k)
+	mu.Lock()
+	defer mu.Unlock()
+	if a, ok := s.cachedAuthFor(k); ok && (!force || !a.at.Before(start)) {
+		return a, nil
+	}
+	if fresh, ok, err := s.grant(ctx, member, org, c.Name); err == nil && ok {
+		*g = fresh
+	}
 	var a cachedAuth
 	var err error
 	switch c.Connect.Kind {
 	case connector.KindAPIKey:
+		if x := c.Connect.APIKey.Exchange; x != nil {
+			a, err = s.exchangeKey(ctx, *x, g.APIKey)
+			break
+		}
 		a = apiKeyAuth(*c.Connect.APIKey, g.APIKey)
 		a.until = s.now().Add(time.Hour)
 	case connector.KindOAuth2:
@@ -109,20 +156,26 @@ func (s *Service) credentials(ctx context.Context, c connector.Connector, org, m
 	if err != nil {
 		return cachedAuth{}, err
 	}
+	a.at = s.now()
 	s.keepAuth(k, a)
 	return a, nil
 }
 
 // apiKeyAuth carries a key the way the connector says.
 func apiKeyAuth(spec connector.APIKey, key string) cachedAuth {
+	return carry(spec.In, spec.Name, spec.Prefix, key)
+}
+
+// carry is a credential carried in, named name, after prefix.
+func carry(in, name, prefix, key string) cachedAuth {
 	a := cachedAuth{header: http.Header{}, query: url.Values{}}
-	switch spec.In {
+	switch in {
 	case "bearer":
 		a.header.Set("Authorization", "Bearer "+key)
 	case "header":
-		a.header.Set(spec.Name, spec.Prefix+key)
+		a.header.Set(name, prefix+key)
 	case "query":
-		a.query.Set(spec.Name, key)
+		a.query.Set(name, key)
 	case "basic":
 		r := &http.Request{Header: http.Header{}}
 		user, pass, _ := cutColon(key)

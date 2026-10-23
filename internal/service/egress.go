@@ -66,6 +66,10 @@ func (s *Service) handleEgress(w http.ResponseWriter, r *http.Request, t compone
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "an egress request names an https URL"})
 		return
 	}
+	if err := connector.CheckPath(u); err != nil {
+		writeJSON(w, http.StatusOK, refusal(http.StatusBadRequest, err.Error(), nil, nil))
+		return
+	}
 	host := strings.ToLower(u.Hostname())
 	out, a := s.serve(r.Context(), t, in, u, host)
 	if a != nil {
@@ -109,6 +113,13 @@ func (s *Service) serve(ctx context.Context, t component.Turn, in component.Egre
 		return refusal(http.StatusForbidden, c.DisplayName+" is not connected: "+t.Requester+" was asked in the room to connect it",
 				connectCard(c, in.Method, u.Path, false), map[string]any{"system": c.Name, "connected": false}),
 			&component.Audit{Action: "request", Target: c.Name + " " + target, Outcome: "deny", Detail: "not connected"}
+	}
+	if ans, ok := c.Answering(in.Method, u.Path); ok {
+		// A CLI's own sign-in step: the component holds the credential, so
+		// it answers the step itself and sends nothing.
+		s.record(ctx, t, c, in.Method, u.Path, ans.Status, "answered")
+		return component.EgressResponse{Status: ans.Status, Header: map[string][]string{"Content-Type": {ans.ContentType}}, Body: []byte(ans.Body)},
+			&component.Audit{Action: "request", Target: c.Name + " " + target, Outcome: "allow", Detail: "answered here"}
 	}
 	class := c.Classify(in.Method, u.Path, in.Body)
 	switch {

@@ -99,6 +99,11 @@ type activityRow struct {
 	When string
 }
 
+type waitingRow struct {
+	Held
+	System, Path, When string
+}
+
 func (s *Service) connectionsPage(w http.ResponseWriter, r *http.Request, m component.Member, action string, form url.Values) {
 	ctx := r.Context()
 	switch action {
@@ -111,6 +116,14 @@ func (s *Service) connectionsPage(w http.ResponseWriter, r *http.Request, m comp
 		return
 	case "reach":
 		s.setReach(w, ctx, m, form.Get("system"), form.Get("reach"))
+		return
+	case "change":
+		// A waiting change, opened from this page: its review, deciding
+		// under this page's address.
+		s.approvePage(w, r, m, "", form)
+		return
+	case "decide":
+		s.approvePage(w, r, m, "decide", form)
 		return
 	default:
 		s.callbackPage(w, http.StatusNotFound, "Not found", "This page does not exist.")
@@ -140,8 +153,19 @@ func (s *Service) connectionsPage(w http.ResponseWriter, r *http.Request, m comp
 	for i := len(calls) - 1; i >= 0 && len(acts) < 20; i-- {
 		acts = append(acts, activityRow{Call: calls[i], When: time.UnixMilli(calls[i].AtMs).UTC().Format("Jan 2 15:04")})
 	}
+	var waiting []waitingRow
+	for _, h := range s.waiting(ctx, m.Subject, m.Org) {
+		row := waitingRow{Held: h, System: h.Connector, When: time.UnixMilli(h.CreatedAtMs).UTC().Format("Jan 2 15:04")}
+		if c, ok := s.connectorNamed(ctx, m.Org, h.Connector); ok {
+			row.System = c.DisplayName
+		}
+		if u, err := url.Parse(h.Request.URL); err == nil {
+			row.Path = clip(u.Path, 120)
+		}
+		waiting = append(waiting, row)
+	}
 	render(w, http.StatusOK, "connections", map[string]any{
-		"Title": "Connections", "Member": m.Subject, "Admin": m.Admin, "Systems": rows, "Activity": acts, "Base": m.PageURL,
+		"Title": "Connections", "Member": m.Subject, "Admin": m.Admin, "Systems": rows, "Activity": acts, "Waiting": waiting, "Base": m.PageURL,
 		"Msg": q.Get("msg"), "Err": q.Get("err") != "",
 	})
 }
@@ -165,7 +189,7 @@ func (s *Service) connect(w http.ResponseWriter, ctx context.Context, m componen
 	}
 	switch c.Connect.Kind {
 	case connector.KindOAuth2:
-		u, err := s.authorizeURL(ctx, c, m, reach)
+		u, err := s.authorizeURL(ctx, c, m, reach, reach, "")
 		if err != nil {
 			back(w, m, "The sign-in cannot start: "+err.Error(), true)
 			return
@@ -216,6 +240,7 @@ func (s *Service) disconnect(w http.ResponseWriter, ctx context.Context, m compo
 		back(w, m, "The connection could not be removed: "+err.Error(), true)
 		return
 	}
+	s.dropWaiting(ctx, m.Subject, m.Org, name)
 	audit(w, component.Audit{Action: "disconnect", Target: name, Outcome: "ok"})
 	back(w, m, "Disconnected.", false)
 }
@@ -230,9 +255,9 @@ func (s *Service) setReach(w http.ResponseWriter, ctx context.Context, m compone
 		reach = connector.Read
 	}
 	c, found := s.connectorNamed(ctx, m.Org, name)
-	if found && c.Connect.Kind == connector.KindOAuth2 && reach == connector.Write && len(c.Connect.OAuth2.Scopes.Write) > 0 && g.Reach != connector.Write {
+	if found && reach == connector.Write && !g.canChange(c) {
 		// Changes need the write scopes: sign in again asking for them.
-		u, err := s.authorizeURL(ctx, c, m, reach)
+		u, err := s.authorizeURL(ctx, c, m, reach, connector.Write, "")
 		if err != nil {
 			back(w, m, "The sign-in cannot start: "+err.Error(), true)
 			return
@@ -279,9 +304,9 @@ func (s *Service) approvePage(w http.ResponseWriter, r *http.Request, m componen
 		render(w, http.StatusOK, "approve", data)
 		return
 	}
-	_ = s.P.Delete(ctx, platform.Member(m.Subject), heldPrefix+h.ID)
 	t := component.Turn{Org: h.Org, Room: h.Room, Job: h.Job, Requester: m.Subject, Drive: component.DriveOwn}
 	if form.Get("decision") != "allow" {
+		_ = s.P.Delete(ctx, platform.Member(m.Subject), heldPrefix+h.ID)
 		s.record(ctx, t, c, h.Request.Method, u.Path, 0, "not allowed")
 		audit(w, component.Audit{Action: "change", Target: c.Name + " " + h.Request.Method + " " + u.Path, Outcome: "deny"})
 		data["Heading"] = "Not made"
@@ -290,9 +315,27 @@ func (s *Service) approvePage(w http.ResponseWriter, r *http.Request, m componen
 	}
 	g, ok, err := s.grant(ctx, m.Subject, m.Org, c.Name)
 	if err != nil || !ok {
+		_ = s.P.Delete(ctx, platform.Member(m.Subject), heldPrefix+h.ID)
 		s.callbackPage(w, http.StatusOK, "Not made", c.DisplayName+" is not connected any more: connect it, then ask your agent again.")
 		return
 	}
+	if !g.canChange(c) {
+		// The sign-in granted reading only: sign in again with the write
+		// scopes; the change stays held until it is allowed again.
+		reach := g.Reach
+		if form.Get("always") == "1" {
+			reach = connector.Write
+		}
+		next, err := s.authorizeURL(ctx, c, m, reach, connector.Write, h.ID)
+		if err != nil {
+			s.callbackPage(w, http.StatusOK, "Not made", "The sign-in for changes cannot start: "+err.Error())
+			return
+		}
+		w.Header().Set("Location", next)
+		w.WriteHeader(http.StatusSeeOther)
+		return
+	}
+	_ = s.P.Delete(ctx, platform.Member(m.Subject), heldPrefix+h.ID)
 	s.signal(ctx, m.Org, c, h.Request.Method, u.Path, signalAllowed)
 	if form.Get("always") == "1" && g.Reach != connector.Write {
 		g.Reach = connector.Write

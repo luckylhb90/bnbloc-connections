@@ -83,7 +83,14 @@ and reviews the drafts agents post there.
     on the admin page. Redirect URI:
     `<bnbloc origin>/v1/component-callbacks/connections/oauth`.
   - `apiKey`: `in` `bearer`, `header` (`name`, `prefix`), `query` (`name`)
-    or `basic` (`user:password`).
+    or `basic` (`user:password`). With `exchange`, the key is traded for a
+    short-lived token first: a POST to `url` (one of the connector's hosts)
+    of `body` (JSON, or a form with `form: true`) where `{{key}}` stands
+    for the key; the token is read at `token` (a dotted path of the
+    answer), kept for `expiresIn` (a dotted path to seconds) or
+    `ttlSeconds` (default 1800), and carried as its own `in`, `name`,
+    `prefix` say. A refused exchange (401, 403) asks to connect again. The
+    component exchanges, so such a connector sends from the server.
   - `provider`: another component speaks the protocol (`url`, `app`); see
     below. Its secret is set on the admin page.
 - `policy`: read rules first (a POST search can be a read, with a `body`
@@ -100,14 +107,26 @@ and reviews the drafts agents post there.
   it. The admin page switches it per connector.
 - `cliEnv`: placeholders a CLI needs before it runs (every credential sent
   to a connector host is replaced).
+- `answers`: requests answered here and never sent, `{method, path,
+  status, contentType, body}` (status 200 and JSON by default): a CLI's
+  own sign-in step (a token exchange) whose credential the component holds,
+  answered with a placeholder the CLI then sends, which is replaced.
 
 ## Serving a request
 
-1. The turn must be the person's own drive.
+1. The turn must be the person's own drive. A path a server may read
+   otherwise than the policy (a `.` or `..` segment, also encoded, an
+   encoded slash, a backslash) is refused (`400`), so the path a rule
+   matched is the path the system serves.
 2. The host must be an enabled connector's.
 3. The person must be connected; else `403` and a Connect card.
-4. The policy class must be read, or a write the person allowed; else the
-   change is **held** (`202` and a Review card) for a day.
+4. An `answers` match is answered here. Otherwise the policy class must be
+   read, or a write the person allowed; else the change is **held** (`202`
+   and a Review card) for a day; the Connections page lists every change
+   waiting, and a disconnect drops them. Allowing one on an OAuth sign-in
+   that granted reading only signs in again for the write scopes. A change
+   sent from the member's computer is allowed once, in its room, for an
+   hour.
 5. Every credential the agent sent (`Authorization`, `Cookie`, the key's
    header) is replaced with the person's; a `401` or an `expiredWhen` match
    is retried once with fresh credentials, then answers `403` and a
@@ -196,6 +215,10 @@ or the credential alone; a variable set in the environment wins.
 Health: `GET /healthz` answers `200 {"ok":true}` (unsigned, no data): the
 liveness and readiness probe. `GET /discover` is open too (the install
 probe).
+Run **one replica**: one grant's credentials are made one at a time in
+the process (a refresh token is never spent twice), and the activity, the
+rate and the signals are kept by that process; replicas would race them.
+
 `BNBLOC_CONNECTIONS_NAME` is the install name (default `connections`);
 `BNBLOC_CONNECTIONS_BASE_PATH` a path prefix when it is served under one.
 

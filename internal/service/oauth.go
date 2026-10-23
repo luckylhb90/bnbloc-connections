@@ -31,10 +31,14 @@ const stateTTL = 15 * time.Minute
 // oauthState is one sign-in under way, kept in the component's scope under
 // its random state.
 type oauthState struct {
-	Member      string `json:"member"`
-	Org         string `json:"org"`
-	Connector   string `json:"connector"`
-	Reach       string `json:"reach"`
+	Member    string `json:"member"`
+	Org       string `json:"org"`
+	Connector string `json:"connector"`
+	Reach     string `json:"reach"`
+	// Scopes: connector.Write when the sign-in asks the write scopes too;
+	// Held: the held change the sign-in was started from.
+	Scopes      string `json:"scopes,omitempty"`
+	Held        string `json:"held,omitempty"`
 	Verifier    string `json:"verifier"`
 	RedirectURI string `json:"redirectUri"`
 	Issuer      string `json:"issuer,omitempty"`
@@ -120,8 +124,9 @@ func (s *Service) redirectURI(origin string) string {
 }
 
 // authorizeURL starts a member's sign-in at the connector's provider and
-// keeps its state.
-func (s *Service) authorizeURL(ctx context.Context, c connector.Connector, m component.Member, reach string) (string, error) {
+// keeps its state: the reach the grant gets, the scopes asked (the write
+// ones too for connector.Write) and the held change it started from.
+func (s *Service) authorizeURL(ctx context.Context, c connector.Connector, m component.Member, reach, scopes, held string) (string, error) {
 	o := *c.Connect.OAuth2
 	e, err := s.endpoints(ctx, o)
 	if err != nil {
@@ -130,14 +135,14 @@ func (s *Service) authorizeURL(ctx context.Context, c connector.Connector, m com
 	verifier := randomToken(48)
 	sum := sha256.Sum256([]byte(verifier))
 	state := randomToken(24)
-	st := oauthState{Member: m.Subject, Org: m.Org, Connector: c.Name, Reach: reach, Verifier: verifier,
+	st := oauthState{Member: m.Subject, Org: m.Org, Connector: c.Name, Reach: reach, Scopes: scopes, Held: held, Verifier: verifier,
 		RedirectURI: s.redirectURI(m.Origin), Issuer: e.Issuer, CreatedAtMs: s.now().UnixMilli()}
 	if err := s.P.PutJSON(ctx, platform.Shared, statePrefix+state, st); err != nil {
 		return "", err
 	}
-	scopes := append([]string(nil), o.Scopes.Read...)
-	if reach == connector.Write {
-		scopes = append(scopes, o.Scopes.Write...)
+	asked := append([]string(nil), o.Scopes.Read...)
+	if scopes == connector.Write {
+		asked = append(asked, o.Scopes.Write...)
 	}
 	q := url.Values{
 		"response_type":         {"code"},
@@ -147,8 +152,8 @@ func (s *Service) authorizeURL(ctx context.Context, c connector.Connector, m com
 		"code_challenge":        {base64.RawURLEncoding.EncodeToString(sum[:])},
 		"code_challenge_method": {"S256"},
 	}
-	if len(scopes) > 0 {
-		q.Set("scope", strings.Join(scopes, " "))
+	if len(asked) > 0 {
+		q.Set("scope", strings.Join(asked, " "))
 	}
 	for k, v := range o.AuthParams {
 		q.Set(k, v)
@@ -302,7 +307,7 @@ func (s *Service) handleOAuthCallback(w http.ResponseWriter, r *http.Request) {
 		s.callbackPage(w, http.StatusBadGateway, "Not connected", "The provider did not give access: "+err.Error())
 		return
 	}
-	g := Grant{Connector: c.Name, Reach: st.Reach, RefreshToken: tok.RefreshToken, ConnectedAtMs: s.now().UnixMilli()}
+	g := Grant{Connector: c.Name, Reach: st.Reach, Scopes: st.Scopes, RefreshToken: tok.RefreshToken, ConnectedAtMs: s.now().UnixMilli()}
 	if tok.RefreshToken == "" {
 		g.AccessToken = tok.AccessToken
 		if tok.ExpiresIn > 0 {
@@ -318,6 +323,10 @@ func (s *Service) handleOAuthCallback(w http.ResponseWriter, r *http.Request) {
 		until:  s.now().Add(time.Duration(max(tok.ExpiresIn, 60))*time.Second - 30*time.Second),
 	})
 	w.Header().Set(component.AuditHeader, component.EncodeHeader(component.Audit{Action: "connect", Target: c.Name, Outcome: "allow", Detail: st.Reach}))
+	if st.Held != "" {
+		s.callbackPage(w, http.StatusOK, c.DisplayName+" can take changes now", "Open the change from its card in the room again and allow it.")
+		return
+	}
 	s.callbackPage(w, http.StatusOK, c.DisplayName+" is connected", "You can close this tab. Your own agents now reach "+c.DisplayName+" as you"+reachWords(st.Reach)+".")
 }
 

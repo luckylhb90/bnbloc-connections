@@ -1,6 +1,11 @@
 {{define "body"}}
 <h1>Connections</h1>
 <p class="sub">The systems your own agents reach as you, {{.Member}}. Nobody else's agent uses your connections, and a change asks you first unless you allow changes for that system.</p>
+{{if .Waiting}}
+<h2>Changes waiting for you</h2>
+{{range .Waiting}}<div class="card"><div class="row"><div><strong>{{.Request.Method}} {{.Path}}</strong> in {{.System}}<div class="muted">Asked {{.When}} UTC in room {{.Room}}</div></div>
+<div><a href="{{$.Base}}change?id={{.ID}}"><button class="primary">Review</button></a></div></div></div>{{end}}
+{{end}}
 {{if not .Systems}}<div class="card">Your organization has not enabled any system yet.{{if .Admin}} Add one on the Connectors page.{{end}}</div>{{end}}
 {{range .Systems}}
 <div class="card{{if .Highlight}} hl{{end}}" id="{{.Name}}">

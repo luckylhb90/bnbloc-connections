@@ -37,10 +37,12 @@ type Service struct {
 	// (nil: a goroutine).
 	Later func(func())
 
-	mu      sync.Mutex
-	orgs    map[string]orgCache
-	tokens  map[grantKey]cachedAuth
-	limiter limiter
+	mu        sync.Mutex
+	orgs      map[string]orgCache
+	tokens    map[grantKey]cachedAuth
+	locks     map[grantKey]*sync.Mutex
+	limiter   limiter
+	activityQ activityQueue
 }
 
 type orgCache struct {
@@ -233,7 +235,12 @@ func (s *Service) forget(org string) {
 }
 
 // saveConnector stores a connector of the organization.
+// saveConnector keeps a connector, checked like any (every change of one
+// goes through here).
 func (s *Service) saveConnector(ctx context.Context, org string, c connector.Connector) error {
+	if err := c.Validate(); err != nil {
+		return err
+	}
 	defer s.forget(org)
 	return s.P.PutJSON(ctx, platform.Org(org), connectorPrefix+c.Name, c)
 }
