@@ -69,7 +69,14 @@ func (s *Service) assist(ctx context.Context, task, org, member, text string) (m
 	if len([]rune(text)) > component.MaxServiceAssistText {
 		text = string([]rune(text)[:component.MaxServiceAssistText])
 	}
-	return s.P.Assist(ctx, s.task(task), component.ServiceAssistRequest{Org: org, Member: member, Text: text})
+	req := component.ServiceAssistRequest{Org: org, Member: member, Text: text}
+	fields, err := s.P.Assist(ctx, s.task(task), req)
+	if err != nil && !errors.Is(err, component.ErrAssistUnavailable) && ctx.Err() == nil {
+		// A model's reply that missed the task's shape now and then: once
+		// more before the run is a failure.
+		fields, err = s.P.Assist(ctx, s.task(task), req)
+	}
+	return fields, err
 }
 
 // aiError is what a page says about a run that did not happen.
