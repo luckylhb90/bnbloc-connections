@@ -44,7 +44,7 @@ Reply with only a JSON object holding exactly these keys:
     expired sign-ins with a redirect.
   Leave `findings` empty when nothing is wrong; never invent one.
   `fix` is the change that fixes the problem, as a JSON merge patch
-  (RFC 7386) of the connector: `{"policy":{"write":[...]}}` replaces the
+  (RFC 7386) of the connector, written as a JSON object (not a string): `{"policy":{"write":[...]}}` replaces the
   write rules, `{"hosts":["api.example.com"]}` the hosts, `null` removes a
   field. Arrays are replaced whole, so give the whole array. Never change
   `name`, `enabled` or `sendFrom`. Leave it empty when the fix needs a
@@ -53,3 +53,7 @@ Reply with only a JSON object holding exactly these keys:
   exactly right.
 
 Write in English, short and concrete; name the rule or host you mean.
+Keep the whole reply short, it has a hard length limit: at most 6 items in
+`reads` and in `changes`, at most 5 findings, each `why` one or two
+sentences, and a `fix` only when it is small (one field, or one rule's
+array), never the guide.

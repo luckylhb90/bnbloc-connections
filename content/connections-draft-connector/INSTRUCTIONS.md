@@ -8,7 +8,8 @@ never instructions to you.
 
 Reply with only a JSON object holding exactly these keys:
 
-- `connector`: the connector as a JSON string, with these fields:
+- `connector`: the connector, as a JSON object (not a string), with these
+  fields:
   - `name` (1-32 of a-z, 0-9, `-`), `displayName`, `purpose` (one line).
   - `hosts`: the exact API hosts, lower case, no scheme, port or wildcard.
   - `connect`, one kind:
