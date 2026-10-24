@@ -49,7 +49,7 @@ func (s *Service) callbackPage(w http.ResponseWriter, status int, heading, text 
 // handlePageList lists the pages bnbloc offers in Components.
 func (s *Service) handlePageList(w http.ResponseWriter, _ *http.Request, _ component.Member, _ []byte) {
 	writeJSON(w, http.StatusOK, component.PageList{Pages: []component.Page{
-		{Name: "connections", Label: "Connections", Audience: component.AudienceMember},
+		{Name: "connections", Label: "Connections", Audience: component.AudienceMember, InRoom: true},
 		{Name: "admin", Label: "Connectors", Audience: component.AudienceAdmin},
 		{Name: "workers", Label: "Digital workers", Audience: component.AudienceMember},
 	}})
@@ -125,20 +125,22 @@ func (s *Service) connectionsPage(w http.ResponseWriter, r *http.Request, m comp
 	case "reach":
 		s.setReach(w, ctx, m, form.Get("system"), form.Get("reach"))
 		return
-	case "actas":
-		name, id := form.Get("system"), form.Get("worker")
-		if id != "" {
-			wk, ok := s.worker(ctx, m.Org, id)
-			if !ok || !wk.Serves(m.Subject, component.DriveOwn) {
-				back(w, m, "That digital worker does not serve your agents.", true)
-				return
-			}
+	case "actas", "roomidentity", "myidentity":
+		// Who agents act as: everywhere (actas), for everyone in this room
+		// (roomidentity, its owner) or for the member in this room.
+		ch := IdentityChange{Scope: ScopeMine, System: form.Get("system"), Worker: form.Get("worker"), Mode: form.Get("mode")}
+		switch action {
+		case "roomidentity":
+			ch.Scope, ch.Room = ScopeRoom, m.Room
+		case "myidentity":
+			ch.Room = m.Room
 		}
-		if err := s.setChoice(ctx, m.Subject, m.Org, name, id); err != nil {
+		a, err := s.applyIdentity(ctx, m, ch)
+		if err != nil {
 			back(w, m, "Not saved: "+err.Error(), true)
 			return
 		}
-		audit(w, component.Audit{Action: "act-as", Target: name, Outcome: "ok", Detail: firstNonEmpty(id, "themselves")})
+		audit(w, a)
 		back(w, m, "Saved.", false)
 		return
 	case "change":
@@ -190,8 +192,26 @@ func (s *Service) connectionsPage(w http.ResponseWriter, r *http.Request, m comp
 		}
 		waiting = append(waiting, row)
 	}
+	var inRoom []roomIdentityRow
+	if m.Room != "" {
+		all, _ := s.workers(ctx, m.Org)
+		for _, c := range list {
+			row := roomIdentityRow{C: c, Workers: ws, Mine: s.myRoomChoice(ctx, m.Subject, m.Org, m.Room, c.Name)}
+			if r, ok := s.roomIdentity(ctx, m.Org, m.Room, c.Name); ok {
+				row.Room, row.HasRoom, row.RoomName = r, true, r.Worker
+				if i := slices.IndexFunc(all, func(wk Worker) bool { return wk.ID == r.Worker }); i >= 0 {
+					row.RoomName = all[i].DisplayName
+				}
+			}
+			if m.RoomRole == component.RoomOwner {
+				row.Workers = all
+			}
+			inRoom = append(inRoom, row)
+		}
+	}
 	render(w, http.StatusOK, "connections", map[string]any{
 		"Title": "Connections", "Member": m.Subject, "Admin": m.Admin, "Systems": rows, "Activity": acts, "Waiting": waiting, "Base": m.PageURL,
+		"Room": m.Room, "RoomOwner": m.RoomRole == component.RoomOwner, "InRoom": inRoom, "MyWorkers": ws,
 		"Msg": q.Get("msg"), "Err": q.Get("err") != "",
 	})
 }

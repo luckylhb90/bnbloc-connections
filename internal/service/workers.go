@@ -258,17 +258,23 @@ type acting struct {
 	g       Grant
 	ok      bool
 	waiting *Worker
+	// required: the room requires the waiting worker.
+	required bool
 }
 
-// actingAs decides who a request for system c in turn t acts as:
-//  1. the requester's own drive: the worker they chose for c, if it serves
-//     them there and is connected; else their own connection;
-//  2. else a connected worker that serves the requester on this drive
-//     (the first by id);
-//  3. else nobody: waiting names a worker that serves them but is not
-//     connected to c.
+// actingAs decides who a request for system c in turn t acts as
+// (identity.go owns the settings it reads), the first that applies:
+//  1. the room requires a worker: it, connected or not (waiting);
+//  2. the requester's choice in this room: themselves, or a worker;
+//  3. the room's default worker;
+//  4. the requester's choice everywhere;
+//  5. their own connection;
+//  6. a connected worker that serves them on this drive (the first by id);
+//  7. nobody: waiting names a worker that serves them but is not connected.
 //
-// A person's own connection serves only their own drive.
+// A worker applies only where its audience serves the requester on this
+// drive (a room never widens it), and a person's own connection only on
+// their own drive.
 func (s *Service) actingAs(ctx context.Context, t component.Turn, c connector.Connector) (acting, error) {
 	ws, err := s.workers(ctx, t.Org)
 	if err != nil {
@@ -280,26 +286,42 @@ func (s *Service) actingAs(ctx context.Context, t component.Turn, c connector.Co
 			serving = append(serving, w)
 		}
 	}
-	try := func(w Worker) (acting, bool, error) {
-		p := principal{Member: t.Requester, Worker: &w}
+	find := func(id string) *Worker {
+		if i := slices.IndexFunc(serving, func(w Worker) bool { return w.ID == id }); i >= 0 {
+			return &serving[i]
+		}
+		return nil
+	}
+	asWorker := func(w *Worker) (acting, error) {
+		p := principal{Member: t.Requester, Worker: w}
 		g, ok, err := s.grantOf(ctx, p, t.Org, c.Name)
-		return acting{p: p, g: g, ok: ok}, ok, err
+		return acting{p: p, g: g, ok: ok}, err
 	}
-	if chosen := s.choice(ctx, t.Requester, t.Org, c.Name); chosen != "" {
-		if i := slices.IndexFunc(serving, func(w Worker) bool { return w.ID == chosen }); i >= 0 {
-			if a, ok, err := try(serving[i]); err != nil || ok {
-				return a, err
-			}
+	asSelf := func() (acting, error) {
+		if t.Drive != component.DriveOwn {
+			return acting{}, nil
 		}
-	}
-	if t.Drive == component.DriveOwn {
 		g, ok, err := s.grant(ctx, t.Requester, t.Org, c.Name)
-		if err != nil || ok {
-			return acting{p: asMember(t.Requester), g: g, ok: ok}, err
+		return acting{p: asMember(t.Requester), g: g, ok: ok}, err
+	}
+	for _, st := range s.identitySteps(ctx, t, c.Name) {
+		var a acting
+		if st.self {
+			a, err = asSelf()
+		} else if w := find(st.worker); w != nil {
+			a, err = asWorker(w)
+			if err == nil && !a.ok && st.required {
+				return acting{p: asMember(t.Requester), waiting: w, required: true}, nil
+			}
+		} else {
+			continue
+		}
+		if err != nil || a.ok {
+			return a, err
 		}
 	}
-	for _, w := range serving {
-		if a, ok, err := try(w); err != nil || ok {
+	for i := range serving {
+		if a, err := asWorker(&serving[i]); err != nil || a.ok {
 			return a, err
 		}
 	}

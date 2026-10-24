@@ -125,7 +125,7 @@ func (s *Service) serve(ctx context.Context, t component.Turn, in component.Egre
 		return refusal(http.StatusBadGateway, "the connections component cannot read your connection right now", nil, nil), nil
 	}
 	if !act.ok {
-		return s.notConnected(t, c, in, u, act.waiting)
+		return s.notConnected(t, c, in, u, act)
 	}
 	p, g := act.p, act.g
 	if p.Worker != nil && in.Report == nil && !s.limiter.allow(p.key()+"\n"+c.Name, s.now()) {
@@ -185,8 +185,13 @@ func asDetail(p principal) string {
 // agent gets a card to connect (naming a worker that would serve once its
 // owners connect it); another drive is told only a digital worker serves
 // it there.
-func (s *Service) notConnected(t component.Turn, c connector.Connector, in component.EgressRequest, u *url.URL, waiting *Worker) (component.EgressResponse, *component.Audit) {
+func (s *Service) notConnected(t component.Turn, c connector.Connector, in component.EgressRequest, u *url.URL, act acting) (component.EgressResponse, *component.Audit) {
 	target := in.Method + " " + u.Path
+	waiting := act.waiting
+	if act.required {
+		return refusal(http.StatusForbidden, c.DisplayName+" in this room acts as "+waiting.DisplayName+", which is not connected to it yet: its owners ("+strings.Join(waiting.Owners, ", ")+") connect it", nil, map[string]any{"system": c.Name, "connected": false}),
+			&component.Audit{Action: "request", Target: c.Name + " " + target, Outcome: "deny", Detail: "room requires worker " + waiting.ID + ", not connected"}
+	}
 	if t.Drive != component.DriveOwn {
 		msg := c.DisplayName + " is reached here only as a digital worker of the organization, and none serves " + t.Requester + "'s request on this agent"
 		if waiting != nil {
@@ -322,17 +327,16 @@ func (s *Service) call(ctx context.Context, c connector.Connector, org string, p
 func connectCard(c connector.Connector, method, path string, again bool, waiting *Worker) *component.Card {
 	title := "Connect " + c.DisplayName
 	text := "Your agent tried " + method + " " + clip(path, 120) + " in " + c.DisplayName + ". Connect it so your own agents can use it as you (reading only, until you allow changes)."
+	actions := []component.CardAction{{Kind: component.CardOpen, Label: "Connect", Page: "connections", Query: "system=" + url.QueryEscape(c.Name)}}
 	if waiting != nil {
-		text += " Or ask " + strings.Join(waiting.Owners, ", ") + " to connect " + waiting.DisplayName + ", a digital worker your agents may act as."
+		text += " Or ask " + strings.Join(waiting.Owners, ", ") + " to connect " + waiting.DisplayName + ", a digital worker your agents may act as, and choose it for this room."
+		actions = append(actions, component.CardAction{Kind: component.CardOpen, Label: "Choose who acts here", Page: "connections", Query: "system=" + url.QueryEscape(c.Name) + "&identity=1"})
 	}
 	if again {
 		title = "Connect " + c.DisplayName + " again"
 		text = "Your connection to " + c.DisplayName + " no longer works (" + method + " " + clip(path, 120) + " was refused). Connect it again."
 	}
-	return &component.Card{Title: clip(title, component.MaxCardTitle), Text: text, Actions: []component.CardAction{
-		{Kind: component.CardOpen, Label: "Connect", Page: "connections", Query: "system=" + url.QueryEscape(c.Name)},
-		{Kind: component.CardAskAgain, Label: "Ask again"},
-	}}
+	return &component.Card{Title: clip(title, component.MaxCardTitle), Text: text, Actions: append(actions, component.CardAction{Kind: component.CardAskAgain, Label: "Ask again"})}
 }
 
 // heldCard asks the person to allow one change.

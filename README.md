@@ -154,15 +154,28 @@ a directory that grants bot accounts directly needs no consent), and sets
 its reach (each change asks the person who asked, or changes without
 asking).
 
-Who a request acts as is decided from the attested turn, never by the
-agent:
+Who a request acts as is decided from the attested turn and the settings
+people made on pages, never by the agent
+(`docs/prd/2026-10-24-connections-room-identity.md` in bnbloc). In a room
+(the Connections page opened from the room's header or a card in it), the
+room's owner sets a worker per system for everyone, **by default** (a
+member may still act as themselves there) or **required**; each member
+chooses for themselves, in the room or everywhere. The first that applies:
 
-1. The member's own agent: the worker the member chose for that system on
-   Connections, if it serves them and is connected; else the member's own
-   connection.
-2. Else a connected worker that serves the member on that agent.
-3. Else a card to connect (naming a worker its owners could connect); a
-   borrowed or platform agent is told only a digital worker serves it.
+1. the room's required worker (not connected: refused, never the person);
+2. the member's choice in this room;
+3. the room's default worker;
+4. the member's choice everywhere;
+5. the member's own connection (their own agent only);
+6. a connected worker that serves them;
+7. a card to connect (naming a worker its owners could connect, with
+   "Choose who acts here"); a borrowed or platform agent is told only a
+   digital worker serves it.
+
+A worker applies only where its audience serves the member on that agent:
+a room never widens it. Every setting goes through one writer
+(`applyIdentity`), which a later proposal (an agent's, the AI's) confirmed
+by the person reuses.
 
 A person's own connection serves only their own agent. A borrowed or
 platform agent gets only the systems a worker serves it at (hosts, facts).

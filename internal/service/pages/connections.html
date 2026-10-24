@@ -1,6 +1,20 @@
 {{define "body"}}
 <h1>Connections</h1>
 <p class="sub">The systems your own agents reach as you, {{.Member}}. Nobody else's agent uses your connections, and a change asks you first unless you allow changes for that system.</p>
+{{if .Room}}
+<h2>In this room</h2>
+<p class="sub">Who agents act as here, per system.{{if .RoomOwner}} As the room's owner you set a digital worker for everyone: by default (each member may still act as themselves) or required.{{end}} A worker acts only for the members and agents its audience allows.</p>
+<table><tr><th>System</th><th>Everyone here</th><th>You here</th></tr>
+{{range .InRoom}}{{$r := .}}<tr><td>{{.C.DisplayName}}</td>
+<td>{{if $.RoomOwner}}<form method="post" action="{{$.Base}}roomidentity"><input type="hidden" name="system" value="{{.C.Name}}">
+<select name="worker"><option value="">no room setting</option>{{range .Workers}}<option value="{{.ID}}"{{if and $r.HasRoom (eq .ID $r.Room.Worker)}} selected{{end}}>{{.DisplayName}}</option>{{end}}</select>
+<select name="mode"><option value="default"{{if eq .Room.Mode "default"}} selected{{end}}>by default</option><option value="required"{{if eq .Room.Mode "required"}} selected{{end}}>required</option></select>
+<button>Save</button></form>{{else if .HasRoom}}{{.RoomName}} ({{if eq .Room.Mode "required"}}required{{else}}by default{{end}}){{else}}<span class="muted">no room setting</span>{{end}}</td>
+<td>{{if and .HasRoom (eq .Room.Mode "required")}}<span class="muted">as {{.RoomName}}, required here</span>{{else}}<form method="post" action="{{$.Base}}myidentity"><input type="hidden" name="system" value="{{.C.Name}}">
+<select name="worker"><option value="">{{if .HasRoom}}as {{.RoomName}} (the room's){{else}}as you{{end}}</option><option value="self"{{if eq .Mine "self"}} selected{{end}}>as you</option>{{range $.MyWorkers}}<option value="{{.ID}}"{{if eq .ID $r.Mine}} selected{{end}}>as {{.DisplayName}}</option>{{end}}</select>
+<button>Save</button></form>{{end}}</td></tr>{{end}}
+</table>
+{{end}}
 {{if .Waiting}}
 <h2>Changes waiting for you</h2>
 {{range .Waiting}}<div class="card"><div class="row"><div><strong>{{.Request.Method}} {{.Path}}</strong> in {{.System}}<div class="muted">Asked {{.When}} UTC in room {{.Room}}</div></div>
