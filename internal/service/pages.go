@@ -49,7 +49,7 @@ func (s *Service) callbackPage(w http.ResponseWriter, status int, heading, text 
 
 // handlePageList lists the pages bnbloc offers in Components.
 func (s *Service) handlePageList(w http.ResponseWriter, _ *http.Request, _ component.Member, _ []byte) {
-	writeJSON(w, http.StatusOK, component.PageList{Pages: []component.Page{
+	writeJSON(w, http.StatusOK, component.PageList{Version: s.Version, Pages: []component.Page{
 		{Name: "connections", Label: "Connections", Audience: component.AudienceMember, InRoom: true},
 		{Name: "admin", Label: "Connectors", Audience: component.AudienceAdmin},
 		{Name: "workers", Label: "Digital workers", Audience: component.AudienceMember},

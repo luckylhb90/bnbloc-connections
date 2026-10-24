@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"runtime/debug"
 	"strings"
 	"syscall"
 	"time"
@@ -39,9 +40,35 @@ const (
 	envBasePath = "BNBLOC_CONNECTIONS_BASE_PATH"
 )
 
+// buildVersion is the release (set at build time), else the source's
+// commit the toolchain recorded (an image built from a checkout).
+func buildVersion() string {
+	if version != "dev" {
+		return version
+	}
+	if info, ok := debug.ReadBuildInfo(); ok {
+		rev, dirty := "", false
+		for _, s := range info.Settings {
+			switch s.Key {
+			case "vcs.revision":
+				rev = s.Value
+			case "vcs.modified":
+				dirty = s.Value == "true"
+			}
+		}
+		if len(rev) >= 7 {
+			if dirty {
+				return rev[:7] + "+"
+			}
+			return rev[:7]
+		}
+	}
+	return version
+}
+
 func main() {
 	if len(os.Args) > 1 && (os.Args[1] == "version" || os.Args[1] == "--version") {
-		fmt.Println("bnbloc-connections", version, commit)
+		fmt.Println("bnbloc-connections", buildVersion(), commit)
 		return
 	}
 	if err := run(); err != nil {
@@ -80,6 +107,7 @@ func run() error {
 		P:        platform.New(gateway, envOr(envName, "connections"), secret),
 		BasePath: strings.TrimSpace(os.Getenv(envBasePath)),
 		Upstream: service.Guarded(),
+		Version:  buildVersion(),
 	}
 	srv := &http.Server{Addr: listen, Handler: svc.Handler(), ReadHeaderTimeout: 10 * time.Second}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -90,7 +118,7 @@ func run() error {
 		defer cancel()
 		_ = srv.Shutdown(sctx)
 	}()
-	slog.Info("bnbloc-connections listening", "addr", listen, "name", svc.P.Name, "version", version)
+	slog.Info("bnbloc-connections listening", "addr", listen, "name", svc.P.Name, "version", buildVersion())
 	if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		return err
 	}
