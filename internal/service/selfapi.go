@@ -36,6 +36,8 @@ type Draft struct {
 	DraftedBy   string              `json:"draftedBy"`
 	Room        string              `json:"room"`
 	CreatedAtMs int64               `json:"createdAtMs"`
+	// Notes: what the AI that drafted it left open.
+	Notes string `json:"notes,omitempty"`
 }
 
 func jsonAnswer(status int, v any) component.EgressResponse {

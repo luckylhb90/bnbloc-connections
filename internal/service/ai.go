@@ -137,6 +137,9 @@ type Finding struct {
 	Severity string `json:"severity"`
 	About    string `json:"about"`
 	Why      string `json:"why"`
+	// Fix is a JSON merge patch (RFC 7386) of the connector the review
+	// proposes, kept only when it makes a valid connector (fixed).
+	Fix string `json:"fix,omitempty"`
 }
 
 // Severities, most severe first.
@@ -230,7 +233,13 @@ func (s *Service) runReview(org, member string, c connector.Connector, draft boo
 			if !slices.Contains(severities, sev) || it["why"] == "" {
 				continue
 			}
-			out.Findings = append(out.Findings, Finding{Severity: sev, About: clip(it["about"], 200), Why: clip(it["why"], 500)})
+			f := Finding{Severity: sev, About: clip(it["about"], 200), Why: clip(it["why"], 500)}
+			if fx := strings.TrimSpace(it["fix"]); fx != "" && len(fx) <= 8<<10 {
+				if _, err := fixed(c, fx); err == nil {
+					f.Fix = fx
+				}
+			}
+			out.Findings = append(out.Findings, f)
 		}
 		sort.SliceStable(out.Findings, func(i, j int) bool {
 			return slices.Index(severities, out.Findings[i].Severity) < slices.Index(severities, out.Findings[j].Severity)

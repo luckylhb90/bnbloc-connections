@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/url"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -223,63 +224,86 @@ func (s *Service) connectionsPage(w http.ResponseWriter, r *http.Request, m comp
 }
 
 func (s *Service) connect(w http.ResponseWriter, ctx context.Context, m component.Member, name, reach, key string) {
+	r := s.connectTo(ctx, m, name, reach, key)
+	if r.audit != nil {
+		audit(w, *r.audit)
+	}
+	if r.open != "" {
+		w.Header().Set("Location", r.open)
+		w.WriteHeader(http.StatusSeeOther)
+		return
+	}
+	back(w, m, r.msg, r.err)
+}
+
+// connectResult is what connecting came to: a line for the member (err:
+// it failed), a sign-in to start (open), the audit row.
+type connectResult struct {
+	msg   string
+	err   bool
+	open  string
+	audit *component.Audit
+}
+
+// connectTo connects the member to a system: a sign-in to start (OAuth), a
+// key (apiKey), or the provider's connect. One owner for the page and the
+// card's in-place Connect.
+func (s *Service) connectTo(ctx context.Context, m component.Member, name, reach, key string) connectResult {
 	c, ok := s.connectorNamed(ctx, m.Org, name)
 	if !ok {
-		back(w, m, "That system is not enabled.", true)
-		return
+		return connectResult{msg: "That system is not enabled.", err: true}
 	}
 	if reach != connector.Write {
 		reach = connector.Read
 	}
-	connected := func(g Grant) {
+	connected := func(g Grant) connectResult {
 		if err := s.saveGrant(ctx, m.Subject, m.Org, g); err != nil {
-			back(w, m, "The connection could not be kept: "+err.Error(), true)
-			return
+			return connectResult{msg: "The connection could not be kept: " + err.Error(), err: true}
 		}
-		audit(w, component.Audit{Action: "connect", Target: c.Name, Outcome: "allow", Detail: reach})
-		back(w, m, c.DisplayName+" is connected. Ask your agent again.", false)
+		return connectResult{msg: c.DisplayName + " is connected. Ask your agent again.", audit: &component.Audit{Action: "connect", Target: c.Name, Outcome: "allow", Detail: reach}}
 	}
 	switch c.Connect.Kind {
 	case connector.KindOAuth2:
 		u, err := s.authorizeURL(ctx, c, m, reach, reach, "")
 		if err != nil {
-			back(w, m, "The sign-in cannot start: "+err.Error(), true)
-			return
+			return connectResult{msg: "The sign-in cannot start: " + err.Error(), err: true}
 		}
-		w.Header().Set("Location", u)
-		w.WriteHeader(http.StatusSeeOther)
+		return connectResult{msg: "Sign in to " + c.DisplayName + " in the page that opened, then ask your agent again.", open: u}
 	case connector.KindAPIKey:
 		key = strings.TrimSpace(key)
 		if c.Connect.APIKey.Sign != nil {
-			// A signing connector takes the key and its secret apart.
+			// A signing connector takes the key and its secret apart; a
+			// private key must read as one.
 			k, sec := splitKeySecret(key)
 			if k == "" || sec == "" {
-				back(w, m, "Paste both the API key and its secret key to connect "+c.DisplayName+".", true)
-				return
+				return connectResult{msg: "Paste both the API key and its secret key to connect " + c.DisplayName + ".", err: true}
+			}
+			if err := checkSecret(sec); err != nil {
+				return connectResult{msg: "That private key cannot sign: " + err.Error() + ".", err: true}
 			}
 		}
-		if key == "" || len(key) > 4096 {
-			back(w, m, "Paste the key to connect "+c.DisplayName+".", true)
-			return
+		if key == "" || len(key) > 8192 {
+			return connectResult{msg: "Paste the key to connect " + c.DisplayName + ".", err: true}
 		}
-		connected(Grant{Connector: c.Name, Reach: reach, APIKey: key, ConnectedAtMs: s.now().UnixMilli()})
+		return connected(Grant{Connector: c.Name, Reach: reach, APIKey: key, ConnectedAtMs: s.now().UnixMilli()})
 	case connector.KindProvider:
 		a, err := s.callProvider(ctx, c, m.Org, provider.ConnectPath, provider.Call{Member: m.Subject, Org: m.Org, Reach: reach})
 		switch {
 		case err != nil:
-			back(w, m, err.Error(), true)
+			return connectResult{msg: err.Error(), err: true}
 		case a.Status == provider.Connected:
-			connected(Grant{Connector: c.Name, Reach: reach, ProviderGrant: a.Grant, ConnectedAtMs: s.now().UnixMilli()})
+			return connected(Grant{Connector: c.Name, Reach: reach, ProviderGrant: a.Grant, ConnectedAtMs: s.now().UnixMilli()})
 		case a.Status == provider.Pending:
-			back(w, m, firstNonEmpty(a.Message, "Confirm the request you were sent, then connect again."), false)
+			return connectResult{msg: firstNonEmpty(a.Message, "Confirm the request you were sent, then connect again.")}
 		default:
 			msg := firstNonEmpty(a.Message, c.DisplayName+" could not be connected.")
 			if a.Admin {
 				msg += " (An administrator arranges this; nothing for you to do.)"
 			}
-			back(w, m, msg, true)
+			return connectResult{msg: msg, err: true}
 		}
 	}
+	return connectResult{msg: "Unknown connect kind.", err: true}
 }
 
 func (s *Service) disconnect(w http.ResponseWriter, ctx context.Context, m component.Member, name string) {
@@ -345,103 +369,41 @@ func (s *Service) approvePage(w http.ResponseWriter, r *http.Request, m componen
 	if action == "decide" {
 		id = form.Get("id")
 	}
-	h, ok := s.held(ctx, m.Subject, id)
 	data := map[string]any{"Title": "A change your agent asked for", "Heading": "A change your agent asked for", "Base": m.PageURL}
-	if !ok || h.Org != m.Org {
+	hc, why := s.heldFor(ctx, m, id)
+	switch {
+	case why != "":
+		s.callbackPage(w, http.StatusOK, "Not made", why)
+		return
+	case hc == nil:
 		render(w, http.StatusOK, "approve", data)
 		return
 	}
-	c, found := s.connectorNamed(ctx, m.Org, h.Connector)
-	if !found {
-		render(w, http.StatusOK, "approve", data)
-		return
-	}
-	u, _ := url.Parse(h.Request.URL)
-	data["System"] = c.DisplayName
-	p := asMember(m.Subject)
-	if h.As != "" {
-		wk, found := s.worker(ctx, m.Org, h.As)
-		if !found || !wk.Serves(m.Subject, firstNonEmpty(h.Drive, component.DriveOwn)) {
-			_ = s.P.Delete(ctx, platform.Member(m.Subject), heldPrefix+h.ID)
-			s.callbackPage(w, http.StatusOK, "Not made", "The digital worker this change acts as no longer serves you here.")
-			return
-		}
-		p = principal{Member: m.Subject, Worker: &wk}
-		data["As"] = wk.DisplayName
+	data["System"] = hc.c.DisplayName
+	if hc.p.Worker != nil {
+		data["As"] = hc.p.Worker.DisplayName
 	}
 	if action != "decide" {
-		data["Held"], data["Path"], data["Body"] = h, u.Path, bodySummary(h.Request.Body)
-		data["Asked"] = time.UnixMilli(h.CreatedAtMs).UTC().Format("Jan 2 15:04 UTC")
+		data["Held"], data["Path"], data["Body"] = hc.h, hc.u.Path, bodySummary(hc.h.Request.Body)
+		data["Asked"] = time.UnixMilli(hc.h.CreatedAtMs).UTC().Format("Jan 2 15:04 UTC")
 		render(w, http.StatusOK, "approve", data)
 		return
 	}
-	t := component.Turn{Org: h.Org, Room: h.Room, Job: h.Job, Requester: m.Subject, Drive: firstNonEmpty(h.Drive, component.DriveOwn)}
-	if form.Get("decision") != "allow" {
-		_ = s.P.Delete(ctx, platform.Member(m.Subject), heldPrefix+h.ID)
-		s.record(ctx, t, p, c, h.Request.Method, u.Path, 0, "not allowed")
-		audit(w, component.Audit{Action: "change", Target: c.Name + " " + h.Request.Method + " " + u.Path, Outcome: "deny"})
-		data["Heading"] = "Not made"
-		render(w, http.StatusOK, "callback", map[string]any{"Title": "Not made", "Heading": "Not made", "Text": "The change was not made. Your agent sees nothing changed."})
-		return
+	d := s.decide(ctx, m, *hc, form.Get("decision") == "allow", form.Get("always") == "1")
+	if d.audit != nil {
+		audit(w, *d.audit)
 	}
-	g, ok, err := s.grantOf(ctx, p, m.Org, c.Name)
-	if err != nil || !ok {
-		_ = s.P.Delete(ctx, platform.Member(m.Subject), heldPrefix+h.ID)
-		s.callbackPage(w, http.StatusOK, "Not made", c.DisplayName+" is not connected any more: connect it, then ask your agent again.")
-		return
-	}
-	if p.Worker != nil && !g.canChange(c) {
-		s.callbackPage(w, http.StatusOK, "Not made", p.as()+" reaches "+c.DisplayName+" for reading only: its owners connect it for changes.")
-		return
-	}
-	if !g.canChange(c) {
-		// The sign-in granted reading only: sign in again with the write
-		// scopes; the change stays held until it is allowed again.
-		reach := g.Reach
-		if form.Get("always") == "1" {
-			reach = connector.Write
-		}
-		next, err := s.authorizeURL(ctx, c, m, reach, connector.Write, h.ID)
-		if err != nil {
-			s.callbackPage(w, http.StatusOK, "Not made", "The sign-in for changes cannot start: "+err.Error())
-			return
-		}
-		w.Header().Set("Location", next)
+	switch {
+	case d.open != "":
+		w.Header().Set("Location", d.open)
 		w.WriteHeader(http.StatusSeeOther)
-		return
+	case d.result != nil:
+		data["Heading"] = "Done"
+		data["Result"], data["ResultBody"] = d.result, bodySummary(d.result.Body)
+		render(w, http.StatusOK, "approve", data)
+	default:
+		s.callbackPage(w, http.StatusOK, d.heading, d.text)
 	}
-	_ = s.P.Delete(ctx, platform.Member(m.Subject), heldPrefix+h.ID)
-	s.signal(ctx, m.Org, c, h.Request.Method, u.Path, signalAllowed)
-	if form.Get("always") == "1" && g.Reach != connector.Write && p.Worker == nil {
-		g.Reach = connector.Write
-		if err := s.saveGrant(ctx, m.Subject, m.Org, g); err != nil {
-			slog.Warn("connections: reach not saved", "error", err)
-		}
-	}
-	if c.FromMember() {
-		// The system is reached from the member's computer: the change is
-		// made by the agent's next send of it, through the member's bridge.
-		if err := s.allow(ctx, m.Subject, h); err != nil {
-			s.callbackPage(w, http.StatusOK, "Not allowed", "The change could not be allowed right now: "+err.Error())
-			return
-		}
-		s.record(ctx, t, p, c, h.Request.Method, u.Path, 0, "allowed")
-		audit(w, component.Audit{Action: "change", Target: c.Name + " " + h.Request.Method + " " + u.Path, Outcome: "allow", Detail: "sent from the member's computer" + asDetail(p)})
-		s.callbackPage(w, http.StatusOK, "Allowed", "Ask your agent again: its next try of this change goes through, from your computer (within an hour).")
-		return
-	}
-	resp, err := s.call(ctx, c, m.Org, p, &g, h.Request, u)
-	if err != nil {
-		s.record(ctx, t, p, c, h.Request.Method, u.Path, 0, "failed")
-		audit(w, component.Audit{Action: "change", Target: c.Name + " " + h.Request.Method + " " + u.Path, Outcome: "failed", Detail: strings.TrimPrefix(asDetail(p), ", ")})
-		s.callbackPage(w, http.StatusOK, "Not made", c.DisplayName+" did not take the change: "+err.Error())
-		return
-	}
-	s.record(ctx, t, p, c, h.Request.Method, u.Path, resp.Status, "allowed")
-	audit(w, component.Audit{Action: "change", Target: c.Name + " " + h.Request.Method + " " + u.Path, Outcome: "allow", Detail: http.StatusText(resp.Status) + asDetail(p)})
-	data["Heading"] = "Done"
-	data["Result"], data["ResultBody"] = resp, bodySummary(resp.Body)
-	render(w, http.StatusOK, "approve", data)
 }
 
 type adminRow struct {
@@ -450,14 +412,25 @@ type adminRow struct {
 	HasClientSecret   bool
 	HasProviderSecret bool
 	Review            Review
+	ReviewBlock       reviewBlock
 	Proposal          Proposal
 	Refused, Allowed  int
 }
 
 type draftRow struct {
 	Draft
-	JSON   string
-	Review Review
+	JSON        string
+	Review      Review
+	ReviewBlock reviewBlock
+}
+
+// reviewBlock is what the review template shows: the review, and where
+// its fixes apply.
+type reviewBlock struct {
+	R     Review
+	Name  string
+	Draft bool
+	Base  string
 }
 
 func pretty(v any) string {
@@ -621,6 +594,25 @@ func (s *Service) adminPage(w http.ResponseWriter, r *http.Request, m component.
 		audit(w, component.Audit{Action: "connector-rule-add", Target: c.Name, Outcome: "ok", Detail: r.Class + " " + r.Method + " " + r.Path + " (suggested)"})
 		back(w, m, c.DisplayName+": "+r.Method+" "+r.Path+" is now "+map[bool]string{true: "a read", false: "a change"}[r.Class == connector.Read]+".", false)
 		return
+	case "describe":
+		d, err := s.draftFromDescription(ctx, m, form.Get("description"))
+		if err != nil {
+			back(w, m, "No draft: "+err.Error(), true)
+			return
+		}
+		audit(w, component.Audit{Action: "connector-draft", Target: d.Connector.Name, Outcome: "ok", Detail: "from a description, by AI"})
+		back(w, m, "Drafted "+d.Connector.DisplayName+": review it below, then add it.", false)
+		return
+	case "applyfix":
+		i, _ := strconv.Atoi(form.Get("finding"))
+		c, err := s.applyFix(ctx, m.Org, form.Get("name"), i)
+		if err != nil {
+			back(w, m, "Not applied: "+err.Error(), true)
+			return
+		}
+		audit(w, component.Audit{Action: "connector-fix", Target: c.Name, Outcome: "ok", Detail: "the review's fix"})
+		back(w, m, c.DisplayName+": fix applied; reviewing it again.", false)
+		return
 	case "dismissrule":
 		s.dismissProposedRule(ctx, m.Org, form.Get("name"), form.Get("id"))
 		back(w, m, "Suggestion dismissed.", false)
@@ -647,12 +639,14 @@ func (s *Service) adminPage(w http.ResponseWriter, r *http.Request, m component.
 				row.Allowed += sig.Count
 			}
 		}
+		row.ReviewBlock = reviewBlock{R: row.Review, Name: c.Name, Base: m.PageURL}
 		pending = pending || row.Review.Pending || row.Proposal.Pending
 		rows = append(rows, row)
 	}
 	var drafts []draftRow
 	for _, d := range s.drafts(ctx, m.Org) {
 		row := draftRow{Draft: d, JSON: pretty(d.Connector), Review: s.ensureReview(ctx, m.Org, m.Subject, d.Connector, true, false)}
+		row.ReviewBlock = reviewBlock{R: row.Review, Name: d.Connector.Name, Draft: true, Base: m.PageURL}
 		pending = pending || row.Review.Pending
 		drafts = append(drafts, row)
 	}

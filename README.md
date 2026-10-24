@@ -99,8 +99,12 @@ and reviews the drafts agents post there.
     `paths`, or that already carries `param` (a client library that signed
     it with a placeholder secret), gets `timestamp` (milliseconds) when it
     has none and `param` set to the hex HMAC-SHA256, keyed by the secret, of
-    its query string followed by its form body. The secret is never sent;
-    such a connector sends from the server.
+    its query string followed by its form body. The secret's kind decides
+    the signature, nothing to configure: a shared secret signs HMAC-SHA256
+    (hex), a PEM private key (pasted on one line or several) Ed25519 or RSA
+    SHA-256 (base64). The secret is never sent; sent from the member's
+    computer, the bridge gets the exact signed query and body
+    (`Send.RawQuery`, `ReplaceBody`).
   - `provider`: another component speaks the protocol (`url`, `app`); see
     below. Its secret is set on the admin page.
 - `policy`: read rules first (a POST search can be a read, with a `body`
@@ -195,7 +199,23 @@ worker's own record (its page) and the audit row name both. A worker's
 credentials never go to a borrowed agent's computer (a connector sent
 from members' computers is refused there).
 
+## In place
+
+A card does what it asks where it is (`component.CardCall`): a held
+change's card has **Allow** and **Don't allow** (the change is made, and the
+card says what the system answered) beside **Review** (the page, with
+"allow without asking from now on"); a sign-in's **Connect** opens the
+system's sign-in at once (OAuth) or asks the provider (SSO); only a key to
+paste opens the Connections page.
+
 ## AI for the admin
+
+Configuring starts from words: **Connect a system** on the Connectors page
+takes a description (and any API documentation pasted) and the AI drafts
+the connector, which arrives as a draft with its review; the JSON stays
+the manual path. A review's finding comes with its **fix** (a JSON merge
+patch, never enabling, renaming or moving where requests go out), applied
+with one click and reviewed again.
 
 The component's own AI helps the admin decide; it never sits in a
 request's path and never reaches an agent

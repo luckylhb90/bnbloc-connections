@@ -487,7 +487,7 @@ func TestAgentDraftsAndAdminAdds(t *testing.T) {
 		t.Fatalf("member on the admin page = %d", rec.Code)
 	}
 	list := fx.page(true, http.MethodGet, "/pages/admin/", nil)
-	if list.Code != 200 || !strings.Contains(list.Body.String(), "Drafts from agents") {
+	if list.Code != 200 || !strings.Contains(list.Body.String(), "<h2>Drafts</h2>") {
 		t.Fatalf("admin page = %d %s", list.Code, list.Body)
 	}
 	if rec := fx.page(true, http.MethodPost, "/pages/admin/draft", url.Values{"name": {"issues"}, "decision": {"accept"}}); rec.Code != http.StatusSeeOther {

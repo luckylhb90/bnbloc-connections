@@ -257,7 +257,18 @@ func (s *Service) fromMember(ctx context.Context, t component.Turn, p principal,
 	if err != nil {
 		return s.failed(ctx, t, p, c, in, u, err)
 	}
-	return component.EgressResponse{Send: &component.EgressSend{Remove: c.CredentialHeaders(), Header: auth.header, Query: auth.query}}, nil
+	send := &component.EgressSend{Remove: c.CredentialHeaders(), Header: auth.header, Query: auth.query}
+	if a := c.Connect.APIKey; a != nil && a.Sign != nil {
+		// Signed here over the exact query and body the bridge sends.
+		var changed bool
+		send.Query = nil
+		send.RawQuery, send.Body, changed = signRequest(c, auth, u, in.Body, headerValue(in.Header, "Content-Type"), s.now())
+		send.ReplaceBody = changed
+		if !changed {
+			send.Body = nil
+		}
+	}
+	return component.EgressResponse{Send: send}, nil
 }
 
 // call makes the request as the member: every credential the agent sent is
@@ -271,17 +282,15 @@ func (s *Service) call(ctx context.Context, c connector.Connector, org string, p
 			return component.EgressResponse{}, err
 		}
 		target := *u
-		if len(auth.query) > 0 {
+		body := in.Body
+		if a := c.Connect.APIKey; a != nil && a.Sign != nil {
+			target.RawQuery, body, _ = signRequest(c, auth, u, in.Body, headerValue(in.Header, "Content-Type"), s.now())
+		} else if len(auth.query) > 0 {
 			q := target.Query()
 			for k, v := range auth.query {
 				q[k] = v
 			}
 			target.RawQuery = q.Encode()
-		}
-		body := in.Body
-		if a := c.Connect.APIKey; a != nil && a.Sign != nil {
-			form := strings.HasPrefix(strings.ToLower(headerValue(in.Header, "Content-Type")), "application/x-www-form-urlencoded")
-			target.RawQuery, body, _ = signed(a.Sign, auth.secret, u.Path, target.RawQuery, in.Body, form, s.now())
 		}
 		req, err := http.NewRequestWithContext(ctx, in.Method, target.String(), bytes.NewReader(body))
 		if err != nil {
@@ -332,7 +341,12 @@ func (s *Service) call(ctx context.Context, c connector.Connector, org string, p
 func connectCard(c connector.Connector, method, path string, again bool, waiting *Worker) *component.Card {
 	title := "Connect " + c.DisplayName
 	text := "Your agent tried " + method + " " + clip(path, 120) + " in " + c.DisplayName + ". Connect it so your own agents can use it as you (reading only, until you allow changes)."
+	// A sign-in or a provider's connect starts in place; a key is pasted on
+	// the page.
 	actions := []component.CardAction{{Kind: component.CardOpen, Label: "Connect", Page: "connections", Query: "system=" + url.QueryEscape(c.Name)}}
+	if c.Connect.Kind != connector.KindAPIKey {
+		actions[0] = callAction("Connect", "connect", url.Values{"system": {c.Name}})
+	}
 	if waiting != nil {
 		text += " Or ask " + strings.Join(waiting.Owners, ", ") + " to connect " + waiting.DisplayName + ", a digital worker your agents may act as, and choose it for this room."
 		actions = append(actions, component.CardAction{Kind: component.CardOpen, Label: "Choose who acts here", Page: "connections", Query: "system=" + url.QueryEscape(c.Name) + "&identity=1"})
@@ -354,6 +368,8 @@ func heldCard(c connector.Connector, p principal, in component.EgressRequest, u 
 		text += "\n" + s
 	}
 	return &component.Card{Title: clip("Allow a change in "+c.DisplayName+"?", component.MaxCardTitle), Text: clip(text, component.MaxCardText), Actions: []component.CardAction{
+		callAction("Allow", "approve", url.Values{"id": {id}, "decision": {"allow"}}),
+		callAction("Don't allow", "approve", url.Values{"id": {id}, "decision": {"deny"}}),
 		{Kind: component.CardOpen, Label: "Review", Page: "approve", Query: "id=" + url.QueryEscape(id)},
 	}}
 }

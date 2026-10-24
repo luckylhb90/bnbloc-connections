@@ -80,6 +80,7 @@ func (s *Service) Handler() http.Handler {
 	mux.HandleFunc("GET "+component.ServiceFactsPath, s.turn(s.handleFacts))
 	mux.HandleFunc("GET "+component.ServicePagesPath, s.member(s.handlePageList))
 	mux.HandleFunc(component.ServicePagesPath+"/", s.member(s.handlePage))
+	mux.HandleFunc("POST "+component.ServiceCardsPrefix, s.member(s.handleCard))
 	mux.HandleFunc(component.ServiceCallbackPrefix+"oauth", s.handleOAuthCallback)
 	if s.BasePath == "" {
 		return mux

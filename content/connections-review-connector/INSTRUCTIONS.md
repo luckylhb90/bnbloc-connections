@@ -27,7 +27,8 @@ Reply with only a JSON object holding exactly these keys:
   does not know the API ("issues and their comments"), at most 8 items.
 - `changes`: what agents change after the member allows it, in plain
   words ("create and edit pages"), at most 8 items.
-- `findings`: problems, most severe first, each `{severity, about, why}`.
+- `findings`: problems, most severe first, each `{severity, about, why,
+  fix}`.
   `severity` is exactly `high`, `medium` or `low`:
   - `high`: a read rule matches a request that changes or deletes data
     (DELETE, PUT, PATCH, or a POST that is not a search or query); a host
@@ -42,5 +43,13 @@ Reply with only a JSON object holding exactly these keys:
     read the main data, a missing `expiredWhen` where the system answers
     expired sign-ins with a redirect.
   Leave `findings` empty when nothing is wrong; never invent one.
+  `fix` is the change that fixes the problem, as a JSON merge patch
+  (RFC 7386) of the connector: `{"policy":{"write":[...]}}` replaces the
+  write rules, `{"hosts":["api.example.com"]}` the hosts, `null` removes a
+  field. Arrays are replaced whole, so give the whole array. Never change
+  `name`, `enabled` or `sendFrom`. Leave it empty when the fix needs a
+  person's knowledge (a value only they have) or when there is nothing to
+  change; the administrator applies it with one click, so it must be
+  exactly right.
 
 Write in English, short and concrete; name the rule or host you mean.

@@ -15,8 +15,9 @@ func TestTasksDeclareWhatTheComponentReads(t *testing.T) {
 		Item       []struct{ Name string }
 	}
 	reads := map[string]map[string]string{
-		taskReview:  {"summary": "text", "reads": "list", "changes": "list", "findings": "items:severity,about,why"},
+		taskReview:  {"summary": "text", "reads": "list", "changes": "list", "findings": "items:severity,about,why,fix"},
 		taskPropose: {"rules": "items:class,method,path,why", "notes": "text"},
+		taskDraft:   {"connector": "text", "notes": "text"},
 	}
 	for task, want := range reads {
 		raw, err := os.ReadFile(filepath.Join("..", "..", "content", "connections-"+task, "component.json"))

@@ -1,9 +1,16 @@
 package service
 
 import (
+	"crypto"
+	"crypto/ed25519"
 	"crypto/hmac"
+	"crypto/rand"
+	"crypto/rsa"
 	"crypto/sha256"
+	"crypto/x509"
+	"encoding/base64"
 	"encoding/hex"
+	"errors"
 	"net/url"
 	"strconv"
 	"strings"
@@ -78,9 +85,11 @@ func signed(sg *connector.Sign, secret, path, rawQuery string, body []byte, form
 	if form {
 		payload += b
 	}
-	mac := hmac.New(sha256.New, []byte(secret))
-	mac.Write([]byte(payload))
-	sig := sg.Param + "=" + hex.EncodeToString(mac.Sum(nil))
+	value, err := signature(secret, []byte(payload))
+	if err != nil {
+		return rawQuery, body, false
+	}
+	sig := sg.Param + "=" + url.QueryEscape(value)
 	if q == "" {
 		q = sig
 	} else {
@@ -100,4 +109,87 @@ func headerValue(h map[string][]string, name string) string {
 		}
 	}
 	return ""
+}
+
+// signature signs payload with the secret, by its kind: a PEM private key
+// signs Ed25519 or RSA PKCS#1 v1.5 SHA-256 (base64); any other secret is
+// an HMAC-SHA256 key (hex).
+func signature(secret string, payload []byte) (string, error) {
+	if !strings.Contains(secret, "-----BEGIN") {
+		mac := hmac.New(sha256.New, []byte(secret))
+		mac.Write(payload)
+		return hex.EncodeToString(mac.Sum(nil)), nil
+	}
+	key, err := privateKey(secret)
+	if err != nil {
+		return "", err
+	}
+	switch k := key.(type) {
+	case ed25519.PrivateKey:
+		return base64.StdEncoding.EncodeToString(ed25519.Sign(k, payload)), nil
+	case *rsa.PrivateKey:
+		sum := sha256.Sum256(payload)
+		sig, err := rsa.SignPKCS1v15(rand.Reader, k, crypto.SHA256, sum[:])
+		return base64.StdEncoding.EncodeToString(sig), err
+	}
+	return "", errors.New("the private key is neither Ed25519 nor RSA")
+}
+
+// privateKey reads a PEM private key as pasted: its line breaks may have
+// become spaces (a one-line field), so the base64 between the markers is
+// read whatever its spacing.
+func privateKey(secret string) (any, error) {
+	start := strings.Index(secret, "-----BEGIN")
+	if start < 0 {
+		return nil, errors.New("no private key")
+	}
+	rest := secret[start:]
+	head := strings.Index(rest[len("-----BEGIN"):], "-----")
+	end := strings.Index(rest, "-----END")
+	if head < 0 || end < 0 {
+		return nil, errors.New("the private key is not whole")
+	}
+	body := rest[len("-----BEGIN")+head+len("-----") : end]
+	der, err := base64.StdEncoding.DecodeString(strings.Join(strings.Fields(body), ""))
+	if err != nil {
+		return nil, errors.New("the private key is not PEM")
+	}
+	if k, err := x509.ParsePKCS8PrivateKey(der); err == nil {
+		return k, nil
+	}
+	if k, err := x509.ParsePKCS1PrivateKey(der); err == nil {
+		return k, nil
+	}
+	return nil, errors.New("the private key is not PKCS#8 or PKCS#1")
+}
+
+// checkSecret refuses a secret a signing connector cannot sign with.
+func checkSecret(secret string) error {
+	if strings.Contains(secret, "-----BEGIN") {
+		_, err := privateKey(secret)
+		return err
+	}
+	return nil
+}
+
+// signRequest is the query string and body a signing connector sends for
+// in (unchanged for another connector): the credentials' query added, then
+// signed with their secret. changed reports a body other than in's.
+func signRequest(c connector.Connector, auth cachedAuth, u *url.URL, in []byte, contentType string, now time.Time) (rawQuery string, body []byte, changed bool) {
+	rawQuery, body = u.RawQuery, in
+	if len(auth.query) > 0 {
+		extra := auth.query.Encode()
+		if rawQuery == "" {
+			rawQuery = extra
+		} else {
+			rawQuery += "&" + extra
+		}
+	}
+	if a := c.Connect.APIKey; a != nil && a.Sign != nil {
+		form := strings.HasPrefix(strings.ToLower(contentType), "application/x-www-form-urlencoded")
+		var ok bool
+		rawQuery, body, ok = signed(a.Sign, auth.secret, u.Path, rawQuery, in, form, now)
+		changed = ok && form
+	}
+	return rawQuery, body, changed
 }

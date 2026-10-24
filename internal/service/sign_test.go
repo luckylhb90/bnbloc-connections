@@ -2,9 +2,16 @@ package service
 
 import (
 	"context"
+	"crypto"
+	"crypto/ed25519"
 	"crypto/hmac"
+	"crypto/rand"
+	"crypto/rsa"
 	"crypto/sha256"
+	"crypto/x509"
+	"encoding/base64"
 	"encoding/hex"
+	"encoding/pem"
 	"net/http"
 	"net/url"
 	"strings"
@@ -72,8 +79,39 @@ func TestSigningConnector(t *testing.T) {
 	if g, _, _ := fx.svc.grant(context.Background(), "maya", "home", "issues"); g.APIKey != "KEY-1:SECRET-1" {
 		t.Fatalf("grant = %+v", g)
 	}
+	// Sent from the member's computer: the bridge gets the signed query.
 	c.SendFrom = connector.SendMember
-	if c.Validate() == nil {
-		t.Fatal("a signing connector sent from members' computers")
+	fx.addConnector(c)
+	sent := fx.egressIn("room-1", component.EgressRequest{Method: "GET", URL: "https://example.com/api/account?recvWindow=5000"})
+	if sent.Send == nil || !strings.HasPrefix(sent.Send.RawQuery, "recvWindow=5000&timestamp=") || !strings.Contains(sent.Send.RawQuery, "&signature=") ||
+		sent.Send.Header["X-Key"][0] != "KEY-1" || sent.Send.ReplaceBody {
+		t.Fatalf("send = %+v", sent.Send)
+	}
+}
+
+// A PEM private key, pasted on one line, signs Ed25519 or RSA (base64,
+// escaped in the query); a key that does not read is refused at connect.
+func TestSignedWithAPrivateKey(t *testing.T) {
+	sg := &connector.Sign{Param: "signature", Timestamp: "timestamp", Paths: []string{"/api/v3/account"}}
+	pub, priv, _ := ed25519.GenerateKey(rand.Reader)
+	der, _ := x509.MarshalPKCS8PrivateKey(priv)
+	pemKey := strings.ReplaceAll(string(pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: der})), "\n", " ")
+	q, _, ok := signed(sg, pemKey, "/api/v3/account", "timestamp=1", nil, false, time.Now())
+	v, _ := url.ParseQuery(q)
+	sig, _ := base64.StdEncoding.DecodeString(v.Get("signature"))
+	if !ok || !ed25519.Verify(pub, []byte("timestamp=1"), sig) {
+		t.Fatalf("ed25519 = %s", q)
+	}
+	rk, _ := rsa.GenerateKey(rand.Reader, 2048)
+	der, _ = x509.MarshalPKCS8PrivateKey(rk)
+	q, _, _ = signed(sg, string(pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: der})), "/api/v3/account", "timestamp=1", nil, false, time.Now())
+	v, _ = url.ParseQuery(q)
+	sig, _ = base64.StdEncoding.DecodeString(v.Get("signature"))
+	sum := sha256.Sum256([]byte("timestamp=1"))
+	if rsa.VerifyPKCS1v15(&rk.PublicKey, crypto.SHA256, sum[:], sig) != nil {
+		t.Fatalf("rsa = %s", q)
+	}
+	if checkSecret("-----BEGIN PRIVATE KEY----- bm90IGEga2V5 -----END PRIVATE KEY-----") == nil || checkSecret("hmac-secret") != nil {
+		t.Fatal("checkSecret")
 	}
 }

@@ -122,9 +122,11 @@ type APIKey struct {
 // Sign signs a request with the member's secret: one whose path matches
 // Paths, or that already carries Param (a client library that signed it
 // with a placeholder secret), gets Timestamp (milliseconds) when it has
-// none, and Param set to the hex HMAC-SHA256, keyed by the secret, of its
-// query string followed by its form body (Param left out of both), at the
-// end of the query string.
+// none, and Param set to the signature of its query string followed by its
+// form body (Param left out of both), at the end of the query string. The
+// secret's kind decides the signature, with nothing to configure: a shared
+// secret signs HMAC-SHA256 (hex); a PEM private key signs Ed25519 or RSA
+// PKCS#1 v1.5 SHA-256 (base64).
 type Sign struct {
 	Param     string   `json:"param"`
 	Timestamp string   `json:"timestamp,omitempty"`
@@ -295,9 +297,6 @@ func (c Connector) Validate() error {
 		if c.FromMember() {
 			return errors.New(`apiKey.exchange: the component exchanges the key itself, so its requests go out from the server (sendFrom "server")`)
 		}
-	}
-	if c.Connect.APIKey != nil && c.Connect.APIKey.Sign != nil && c.FromMember() {
-		return errors.New(`apiKey.sign: the component signs each request as it sends it, so its requests go out from the server (sendFrom "server")`)
 	}
 	return nil
 }
