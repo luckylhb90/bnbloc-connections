@@ -55,7 +55,9 @@ type RoomIdentity struct {
 // Store keys: a room's (organization scope) and a member's in a room
 // (member scope); a member's everywhere is actAsPrefix (workers.go).
 func roomIdentityKey(room, system string) string { return "roomid:" + room + ":" + system }
-func myRoomKey(org, room, system string) string  { return "actasroom:" + org + ":" + room + ":" + system }
+func myRoomKey(org, room, system string) string {
+	return "actasroom:" + org + ":" + room + ":" + system
+}
 
 func (s *Service) roomIdentity(ctx context.Context, org, room, system string) (RoomIdentity, bool) {
 	var r RoomIdentity

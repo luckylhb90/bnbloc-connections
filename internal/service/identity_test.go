@@ -62,7 +62,9 @@ func TestRoomIdentity(t *testing.T) {
 	}
 	expect(turnIn("maya", "room-1", component.DriveOwn), maya)
 
-	saved := func(rec interface{ Header() http.Header }) bool { return !strings.Contains(rec.Header().Get("Location"), "err=1") }
+	saved := func(rec interface{ Header() http.Header }) bool {
+		return !strings.Contains(rec.Header().Get("Location"), "err=1")
+	}
 	if saved(fx.pageIn("jack", "room-1", "member", http.MethodPost, "/pages/connections/roomidentity", url.Values{"system": {"issues"}, "worker": {"release-bot"}, "mode": {"default"}})) {
 		t.Fatal("a member set the room's identity")
 	}
