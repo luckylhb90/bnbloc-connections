@@ -278,7 +278,12 @@ func (s *Service) call(ctx context.Context, c connector.Connector, org string, p
 			}
 			target.RawQuery = q.Encode()
 		}
-		req, err := http.NewRequestWithContext(ctx, in.Method, target.String(), bytes.NewReader(in.Body))
+		body := in.Body
+		if a := c.Connect.APIKey; a != nil && a.Sign != nil {
+			form := strings.HasPrefix(strings.ToLower(headerValue(in.Header, "Content-Type")), "application/x-www-form-urlencoded")
+			target.RawQuery, body, _ = signed(a.Sign, auth.secret, u.Path, target.RawQuery, in.Body, form, s.now())
+		}
+		req, err := http.NewRequestWithContext(ctx, in.Method, target.String(), bytes.NewReader(body))
 		if err != nil {
 			return component.EgressResponse{}, err
 		}

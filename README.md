@@ -93,7 +93,14 @@ and reviews the drafts agents post there.
     answer), kept for `expiresIn` (a dotted path to seconds) or
     `ttlSeconds` (default 1800), and carried as its own `in`, `name`,
     `prefix` say. A refused exchange (401, 403) asks to connect again. The
-    component exchanges, so such a connector sends from the server.
+    component exchanges, so such a connector sends from the server. With `sign`
+    (`{param, timestamp, paths}`), the member pastes the key and its secret;
+    the key is carried as `in` says and each request whose path matches
+    `paths`, or that already carries `param` (a client library that signed
+    it with a placeholder secret), gets `timestamp` (milliseconds) when it
+    has none and `param` set to the hex HMAC-SHA256, keyed by the secret, of
+    its query string followed by its form body. The secret is never sent;
+    such a connector sends from the server.
   - `provider`: another component speaks the protocol (`url`, `app`); see
     below. Its secret is set on the admin page.
 - `policy`: read rules first (a POST search can be a read, with a `body`

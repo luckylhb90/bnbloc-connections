@@ -50,8 +50,10 @@
   {{if and (not .Connected) (eq .Kind "apiKey")}}
   <form class="block" method="post" action="{{$.Base}}connect">
     <input type="hidden" name="system" value="{{.Name}}"><input type="hidden" name="reach" value="read">
-    <label for="key-{{.Name}}">Key{{if .Help}} ({{.Help}}){{end}}</label>
+    <label for="key-{{.Name}}">{{if .Signs}}API key{{else}}Key{{end}}{{if .Help}} ({{.Help}}){{end}}</label>
     <input id="key-{{.Name}}" type="password" name="key" autocomplete="off" required>
+    {{if .Signs}}<label for="secret-{{.Name}}">Secret key</label>
+    <input id="secret-{{.Name}}" type="password" name="secret" autocomplete="off" required>{{end}}
     <p><button class="primary">Connect</button></p>
   </form>
   {{else if and (not .Connected) .Help}}<div class="muted">{{.Help}}</div>{{end}}

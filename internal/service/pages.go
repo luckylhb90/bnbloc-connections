@@ -96,6 +96,8 @@ type systemRow struct {
 	Kind      string
 	Help      string
 	Highlight bool
+	// Signs: the key comes with a secret (connector.Sign).
+	Signs bool
 	// Workers serve the member's own agents here; Chosen is the one they
 	// chose to act as ("": themselves).
 	Workers []Worker
@@ -117,7 +119,11 @@ func (s *Service) connectionsPage(w http.ResponseWriter, r *http.Request, m comp
 	switch action {
 	case "":
 	case "connect":
-		s.connect(w, ctx, m, form.Get("system"), form.Get("reach"), form.Get("key"))
+		key := form.Get("key")
+		if sec := strings.TrimSpace(form.Get("secret")); sec != "" {
+			key = strings.TrimSpace(key) + ":" + sec
+		}
+		s.connect(w, ctx, m, form.Get("system"), form.Get("reach"), key)
 		return
 	case "disconnect":
 		s.disconnect(w, ctx, m, form.Get("system"))
@@ -170,7 +176,7 @@ func (s *Service) connectionsPage(w http.ResponseWriter, r *http.Request, m comp
 		row := systemRow{SystemView: v, Kind: c.Connect.Kind, Highlight: q.Get("system") == v.Name, Workers: ws, Chosen: s.choice(ctx, m.Subject, m.Org, c.Name)}
 		switch {
 		case c.Connect.APIKey != nil:
-			row.Help = c.Connect.APIKey.Help
+			row.Help, row.Signs = c.Connect.APIKey.Help, c.Connect.APIKey.Sign != nil
 		case c.Connect.Provider != nil:
 			row.Help = c.Connect.Provider.Help
 		}
@@ -244,6 +250,14 @@ func (s *Service) connect(w http.ResponseWriter, ctx context.Context, m componen
 		w.WriteHeader(http.StatusSeeOther)
 	case connector.KindAPIKey:
 		key = strings.TrimSpace(key)
+		if c.Connect.APIKey.Sign != nil {
+			// A signing connector takes the key and its secret apart.
+			k, sec := splitKeySecret(key)
+			if k == "" || sec == "" {
+				back(w, m, "Paste both the API key and its secret key to connect "+c.DisplayName+".", true)
+				return
+			}
+		}
 		if key == "" || len(key) > 4096 {
 			back(w, m, "Paste the key to connect "+c.DisplayName+".", true)
 			return

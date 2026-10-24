@@ -114,6 +114,21 @@ type APIKey struct {
 	// Exchange: the key is not sent to the system as is; the component
 	// trades it for a short-lived token first and sends that.
 	Exchange *Exchange `json:"exchange,omitempty"`
+	// Sign: the key is "<key>:<secret>"; the key is carried as In says and
+	// the component signs requests with the secret (Sign).
+	Sign *Sign `json:"sign,omitempty"`
+}
+
+// Sign signs a request with the member's secret: one whose path matches
+// Paths, or that already carries Param (a client library that signed it
+// with a placeholder secret), gets Timestamp (milliseconds) when it has
+// none, and Param set to the hex HMAC-SHA256, keyed by the secret, of its
+// query string followed by its form body (Param left out of both), at the
+// end of the query string.
+type Sign struct {
+	Param     string   `json:"param"`
+	Timestamp string   `json:"timestamp,omitempty"`
+	Paths     []string `json:"paths,omitempty"`
 }
 
 // Exchange trades a member's key for a short-lived token at one of the
@@ -281,6 +296,9 @@ func (c Connector) Validate() error {
 			return errors.New(`apiKey.exchange: the component exchanges the key itself, so its requests go out from the server (sendFrom "server")`)
 		}
 	}
+	if c.Connect.APIKey != nil && c.Connect.APIKey.Sign != nil && c.FromMember() {
+		return errors.New(`apiKey.sign: the component signs each request as it sends it, so its requests go out from the server (sendFrom "server")`)
+	}
 	return nil
 }
 
@@ -343,6 +361,16 @@ func (c Connect) validate() error {
 		}
 		if err := carried(a.In, a.Name, true); err != nil {
 			return fmt.Errorf("apiKey: %w", err)
+		}
+		if sg := a.Sign; sg != nil {
+			if strings.TrimSpace(sg.Param) == "" || a.Exchange != nil || a.In == "basic" {
+				return errors.New("apiKey.sign: a param, with no exchange and a key not sent as basic")
+			}
+			for _, p := range sg.Paths {
+				if !strings.HasPrefix(p, "/") {
+					return fmt.Errorf("apiKey.sign.paths: %q must start with /", p)
+				}
+			}
 		}
 		if x := a.Exchange; x != nil {
 			if err := carried(x.In, x.Name, false); err != nil {

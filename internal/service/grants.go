@@ -67,6 +67,8 @@ type cachedAuth struct {
 	query  url.Values
 	until  time.Time
 	at     time.Time
+	// secret signs each request (connector.Sign); never sent.
+	secret string
 }
 
 func (s *Service) cachedAuthFor(k grantKey) (cachedAuth, bool) {
@@ -142,6 +144,12 @@ func (s *Service) credentials(ctx context.Context, c connector.Connector, org st
 	case connector.KindAPIKey:
 		if x := c.Connect.APIKey.Exchange; x != nil {
 			a, err = s.exchangeKey(ctx, *x, g.APIKey)
+			break
+		}
+		if c.Connect.APIKey.Sign != nil {
+			key, secret := splitKeySecret(g.APIKey)
+			a = apiKeyAuth(*c.Connect.APIKey, key)
+			a.secret, a.until = secret, s.now().Add(time.Hour)
 			break
 		}
 		a = apiKeyAuth(*c.Connect.APIKey, g.APIKey)
