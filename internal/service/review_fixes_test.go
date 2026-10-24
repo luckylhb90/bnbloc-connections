@@ -198,3 +198,32 @@ func TestKeyExchangeAndAnswers(t *testing.T) {
 		t.Fatal("an exchanging connector sent from members' computers")
 	}
 }
+
+// A provider that wants its scopes comma-separated gets them so, and one
+// whose revocation is the access token as a bearer gets that on a
+// disconnect (refreshed from the grant).
+func TestOAuthScopeSeparatorAndBearerRevocation(t *testing.T) {
+	fx := newFixture(t)
+	c := issues()
+	c.Connect = connector.Connect{Kind: connector.KindOAuth2, OAuth2: &connector.OAuth2{
+		AuthorizationEndpoint: "https://example.com/oauth/authorize", TokenEndpoint: "https://example.com/oauth/token",
+		RevocationEndpoint: "https://example.com/oauth/revoke", RevocationAuth: "bearer", ScopeSeparator: ",",
+		ClientID: "client-1", ClientAuth: "post", Scopes: connector.Scopes{Read: []string{"user:openId", "user:email"}},
+	}}
+	fx.addConnector(c)
+	rec := fx.page(false, http.MethodPost, "/pages/connections/connect", url.Values{"system": {"issues"}, "reach": {"read"}})
+	loc, _ := url.Parse(rec.Header().Get("Location"))
+	if loc.Query().Get("scope") != "user:openId,user:email" {
+		t.Fatalf("scope = %q", loc.Query().Get("scope"))
+	}
+	_ = fx.svc.saveGrant(context.Background(), "maya", "home", Grant{Connector: "issues", Reach: connector.Read, RefreshToken: "refresh-1"})
+	_ = fx.page(false, http.MethodPost, "/pages/connections/disconnect", url.Values{"system": {"issues"}})
+	last := fx.last()
+	if last.path != "/oauth/revoke" || last.header.Get("Authorization") != "Bearer access-2" || last.body != "" {
+		t.Fatalf("revoke = %+v", last)
+	}
+	c.Connect.OAuth2.ScopeSeparator = ";"
+	if c.Validate() == nil {
+		t.Fatal("a separator of another kind")
+	}
+}

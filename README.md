@@ -79,7 +79,10 @@ and reviews the drafts agents post there.
   - `oauth2`: authorization code with PKCE; `issuer` (RFC 8414 / OIDC
     discovery) or the endpoints; `clientId`; `scopes.read` and
     `scopes.write`; `authParams` (e.g. `access_type=offline`);
-    `clientAuth` `basic` (default) or `post`. The client secret is set apart
+    `clientAuth` `basic` (default) or `post`; `scopeSeparator` `" "`
+    (default) or `","` for a provider that wants comma-separated scopes;
+    `revocationAuth` `""` (RFC 7009) or `"bearer"` (a POST carrying the
+    access token as a bearer, refreshed from the grant). The client secret is set apart
     on the admin page. Redirect URI:
     `<bnbloc origin>/v1/component-callbacks/connections/oauth`.
   - `apiKey`: `in` `bearer`, `header` (`name`, `prefix`), `query` (`name`)

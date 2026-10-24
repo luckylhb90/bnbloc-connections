@@ -153,7 +153,11 @@ func (s *Service) authorizeURL(ctx context.Context, c connector.Connector, m com
 		"code_challenge_method": {"S256"},
 	}
 	if len(asked) > 0 {
-		q.Set("scope", strings.Join(asked, " "))
+		sep := o.ScopeSeparator
+		if sep == "" {
+			sep = " "
+		}
+		q.Set("scope", strings.Join(asked, sep))
 	}
 	for k, v := range o.AuthParams {
 		q.Set(k, v)
@@ -245,13 +249,31 @@ func (s *Service) revoke(ctx context.Context, c connector.Connector, org string,
 	if err != nil || e.Revocation == "" {
 		return
 	}
-	tok := g.RefreshToken
-	if tok == "" {
-		tok = g.AccessToken
-	}
-	req, err := s.clientRequest(ctx, c, org, e.Revocation, url.Values{"token": {tok}})
-	if err != nil {
-		return
+	var req *http.Request
+	if o.RevocationAuth == "bearer" {
+		// The access token revokes itself: one from the grant (refreshed
+		// when it holds none that lasts).
+		access := g.AccessToken
+		if g.RefreshToken != "" {
+			if t, err := s.refresh(ctx, c, org, g.RefreshToken); err == nil {
+				access = t.AccessToken
+			}
+		}
+		if access == "" {
+			return
+		}
+		if req, err = http.NewRequestWithContext(ctx, http.MethodPost, e.Revocation, nil); err != nil {
+			return
+		}
+		req.Header.Set("Authorization", "Bearer "+access)
+	} else {
+		tok := g.RefreshToken
+		if tok == "" {
+			tok = g.AccessToken
+		}
+		if req, err = s.clientRequest(ctx, c, org, e.Revocation, url.Values{"token": {tok}}); err != nil {
+			return
+		}
 	}
 	resp, err := s.upstream().Do(req)
 	if err != nil {

@@ -87,6 +87,13 @@ type OAuth2 struct {
 	// ClientAuth is how the client authenticates at the token endpoint:
 	// "basic" (default) or "post".
 	ClientAuth string `json:"clientAuth,omitempty"`
+	// ScopeSeparator joins the scopes asked: " " (default, RFC 6749) or
+	// "," (a provider that wants them comma-separated).
+	ScopeSeparator string `json:"scopeSeparator,omitempty"`
+	// RevocationAuth is how a revocation is sent: "" (RFC 7009: the token
+	// in a form, with the client's credentials) or "bearer" (a POST
+	// carrying the access token as a bearer, nothing else).
+	RevocationAuth string `json:"revocationAuth,omitempty"`
 }
 
 // Scopes are what a read-only connection asks, and what changes add.
@@ -322,6 +329,12 @@ func (c Connect) validate() error {
 		}
 		if o.ClientAuth != "" && o.ClientAuth != "basic" && o.ClientAuth != "post" {
 			return errors.New(`oauth2.clientAuth: "basic" or "post"`)
+		}
+		if o.ScopeSeparator != "" && o.ScopeSeparator != " " && o.ScopeSeparator != "," {
+			return errors.New(`oauth2.scopeSeparator: " " (default) or ","`)
+		}
+		if o.RevocationAuth != "" && o.RevocationAuth != "bearer" {
+			return errors.New(`oauth2.revocationAuth: "" (RFC 7009) or "bearer"`)
 		}
 	case KindAPIKey:
 		a := c.APIKey
