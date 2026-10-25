@@ -39,8 +39,18 @@ func TestConfigureByDescriptionAndFixes(t *testing.T) {
 	if strings.Contains(rec.Header().Get("Location"), "err=1") || auditOf(t, rec).Action != "connector-draft" {
 		t.Fatalf("describe = %s", rec.Header().Get("Location"))
 	}
-	if rec := fx.page(true, http.MethodPost, "/pages/admin/describe", url.Values{"description": {"something else"}}); !strings.Contains(rec.Header().Get("Location"), "err=1") {
-		t.Fatal("an invalid draft was kept")
+	if len(fx.svc.draftings(context.Background(), "home")) != 0 {
+		t.Fatal("a drafting that made its draft is still shown")
+	}
+	// A draft the AI got wrong is no draft: the page says why, until dismissed.
+	_ = fx.page(true, http.MethodPost, "/pages/admin/describe", url.Values{"description": {"something else"}})
+	failed := fx.svc.draftings(context.Background(), "home")
+	if len(failed) != 1 || failed[0].Error == "" || !strings.Contains(fx.page(true, http.MethodGet, "/pages/admin/", nil).Body.String(), "No draft") {
+		t.Fatalf("a failed drafting = %+v", failed)
+	}
+	_ = fx.page(true, http.MethodPost, "/pages/admin/dismissdrafting", url.Values{"id": {failed[0].ID}})
+	if len(fx.svc.draftings(context.Background(), "home")) != 0 {
+		t.Fatal("dismissed, still shown")
 	}
 	var d Draft
 	if ok, _ := fx.svc.P.GetJSON(context.Background(), platform.Org("home"), draftPrefix+"issues", &d); !ok || d.Notes == "" || d.Connector.Enabled {
@@ -62,5 +72,17 @@ func TestConfigureByDescriptionAndFixes(t *testing.T) {
 	}
 	if rec := fx.page(true, http.MethodPost, "/pages/admin/applyfix", url.Values{"name": {"issues"}, "finding": {"0"}}); !strings.Contains(rec.Header().Get("Location"), "err=1") {
 		t.Fatal("a fix applied twice")
+	}
+}
+
+// A drafted connector is read strictly, with the key's sign and extra put
+// in apiKey when the model wrote them beside it.
+func TestParseDraft(t *testing.T) {
+	c, err := parseDraft([]byte(`{"name":"x","connect":{"kind":"apiKey","apiKey":{"in":"header","name":"K"},"sign":{"in":"header","header":"S"},"extra":[{"name":"passphrase","label":"P","header":"H"}]}}`))
+	if err != nil || c.Connect.APIKey.Sign == nil || c.Connect.APIKey.Sign.Header != "S" || len(c.Connect.APIKey.Extra) != 1 {
+		t.Fatalf("parsed = %+v %v", c.Connect.APIKey, err)
+	}
+	if _, err := parseDraft([]byte(`{"name":"x","signing":{}}`)); err == nil {
+		t.Fatal("an unknown field was dropped silently")
 	}
 }

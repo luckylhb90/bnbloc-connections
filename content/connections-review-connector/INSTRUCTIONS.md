@@ -39,6 +39,9 @@ Reply with only a JSON object holding exactly these keys:
     (`/**` with every method) when narrower paths are clear; OAuth scopes
     beyond the stated purpose; a body regular expression a change can
     satisfy.
+  - `high` too: an API that signs its requests with a secret (a crypto
+    exchange's) with no `sign`, or a value it needs beside the key (a
+    passphrase) with no `extra`: members could not use it at all.
   - `low`: unclear names or purpose, a guide that does not show how to
     read the main data, a missing `expiredWhen` where the system answers
     expired sign-ins with a redirect.

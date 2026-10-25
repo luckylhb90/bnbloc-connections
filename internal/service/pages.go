@@ -614,13 +614,19 @@ func (s *Service) adminPage(w http.ResponseWriter, r *http.Request, m component.
 		back(w, m, c.DisplayName+": "+r.Method+" "+r.Path+" is now "+map[bool]string{true: "a read", false: "a change"}[r.Class == connector.Read]+".", false)
 		return
 	case "describe":
-		d, err := s.draftFromDescription(ctx, m, form.Get("description"))
-		if err != nil {
+		// Drafting takes the model's time: it runs off the request, and the
+		// page shows it under way until the draft (or why there is none)
+		// is there.
+		if err := s.startDrafting(ctx, m, form.Get("description")); err != nil {
 			back(w, m, "No draft: "+err.Error(), true)
 			return
 		}
-		audit(w, component.Audit{Action: "connector-draft", Target: d.Connector.Name, Outcome: "ok", Detail: "from a description, by AI"})
-		back(w, m, "Drafted "+d.Connector.DisplayName+": review it below, then add it.", false)
+		audit(w, component.Audit{Action: "connector-draft", Target: "", Outcome: "queued", Detail: "from a description, by AI"})
+		back(w, m, "AI is drafting the connector: it appears under Drafts in a few seconds.", false)
+		return
+	case "dismissdrafting":
+		_ = s.P.Delete(ctx, org, draftingPrefix+form.Get("id"))
+		back(w, m, "Dismissed.", false)
 		return
 	case "applyfix":
 		i, _ := strconv.Atoi(form.Get("finding"))
@@ -670,5 +676,9 @@ func (s *Service) adminPage(w http.ResponseWriter, r *http.Request, m component.
 		drafts = append(drafts, row)
 	}
 	q := r.URL.Query()
-	render(w, http.StatusOK, "admin", map[string]any{"Title": "Connectors", "Connectors": rows, "Drafts": drafts, "Base": m.PageURL, "Msg": q.Get("msg"), "Err": q.Get("err") != "", "Refresh": pending})
+	drafting := s.draftings(ctx, m.Org)
+	for _, d := range drafting {
+		pending = pending || d.Error == ""
+	}
+	render(w, http.StatusOK, "admin", map[string]any{"Title": "Connectors", "Connectors": rows, "Drafts": drafts, "Drafting": drafting, "Base": m.PageURL, "Msg": q.Get("msg"), "Err": q.Get("err") != "", "Refresh": pending})
 }

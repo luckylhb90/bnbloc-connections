@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"sort"
 	"strings"
 
 	"github.com/luckylhb90/bnbloc-connections/connector"
@@ -33,8 +34,8 @@ func (s *Service) draftFromDescription(ctx context.Context, m component.Member, 
 	}
 	raw := strings.TrimSpace(textField(fields, "connector", 16<<10))
 	raw = strings.TrimSuffix(strings.TrimPrefix(strings.TrimPrefix(raw, "```json"), "```"), "```")
-	var c connector.Connector
-	if err := json.Unmarshal([]byte(raw), &c); err != nil {
+	c, err := parseDraft([]byte(raw))
+	if err != nil {
 		return Draft{}, errors.New("the AI's draft is not a connector's JSON: " + err.Error())
 	}
 	c.Enabled = false
@@ -110,4 +111,96 @@ func (s *Service) applyFix(ctx context.Context, org, name string, i int) (connec
 		return c, err
 	}
 	return next, s.saveConnector(ctx, org, next)
+}
+
+// drafting is a draft from a description under way (organization scope),
+// or why it failed (Error).
+type drafting struct {
+	ID          string `json:"id"`
+	Description string `json:"description"`
+	By          string `json:"by"`
+	AtMs        int64  `json:"atMs"`
+	Error       string `json:"error,omitempty"`
+}
+
+const draftingPrefix = "drafting:"
+
+// startDrafting keeps a drafting under way and runs it off the request.
+func (s *Service) startDrafting(ctx context.Context, m component.Member, description string) error {
+	description = strings.TrimSpace(description)
+	if description == "" {
+		return errors.New("describe the system first")
+	}
+	d := drafting{ID: randomToken(8), Description: clip(strings.Join(strings.Fields(description), " "), 160), By: m.Subject, AtMs: s.now().UnixMilli()}
+	if err := s.P.PutJSON(ctx, platform.Org(m.Org), draftingPrefix+d.ID, d); err != nil {
+		return err
+	}
+	s.later(func() {
+		ctx, cancel := aiContext()
+		defer cancel()
+		if _, err := s.draftFromDescription(ctx, m, description); err != nil {
+			d.Error = err.Error()
+			_ = s.P.PutJSON(ctx, platform.Org(m.Org), draftingPrefix+d.ID, d)
+			return
+		}
+		_ = s.P.Delete(ctx, platform.Org(m.Org), draftingPrefix+d.ID)
+	})
+	return nil
+}
+
+// draftings are the organization's draftings: under way (a run that
+// stopped long ago is dropped) or failed, newest first.
+func (s *Service) draftings(ctx context.Context, org string) []drafting {
+	keys, err := s.P.Keys(ctx, platform.Org(org))
+	if err != nil {
+		return nil
+	}
+	var out []drafting
+	for _, k := range keys {
+		if !strings.HasPrefix(k, draftingPrefix) {
+			continue
+		}
+		var d drafting
+		if ok, _ := s.P.GetJSON(ctx, platform.Org(org), k, &d); !ok {
+			continue
+		}
+		if d.Error == "" && s.now().UnixMilli()-d.AtMs > aiPending.Milliseconds() {
+			_ = s.P.Delete(ctx, platform.Org(org), k)
+			continue
+		}
+		out = append(out, d)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].AtMs > out[j].AtMs })
+	return out
+}
+
+// parseDraft reads an AI's connector strictly: a field connectors do not
+// take is an error, never silently lost (a signature in the wrong place is
+// a connector that cannot sign). The one misplacement a model makes, the
+// key's sign and extra beside apiKey instead of in it, is put right first.
+func parseDraft(raw []byte) (connector.Connector, error) {
+	var doc map[string]any
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		return connector.Connector{}, err
+	}
+	if conn, ok := doc["connect"].(map[string]any); ok {
+		if key, ok := conn["apiKey"].(map[string]any); ok {
+			for _, f := range []string{"sign", "extra", "exchange"} {
+				if v, ok := conn[f]; ok {
+					if _, has := key[f]; !has {
+						key[f] = v
+					}
+					delete(conn, f)
+				}
+			}
+		}
+	}
+	fixed, _ := json.Marshal(doc)
+	dec := json.NewDecoder(strings.NewReader(string(fixed)))
+	dec.DisallowUnknownFields()
+	var c connector.Connector
+	if err := dec.Decode(&c); err != nil {
+		return connector.Connector{}, err
+	}
+	return c, nil
 }

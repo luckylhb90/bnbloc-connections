@@ -1,7 +1,7 @@
 {
   "kind": "bnbloc.assist.package/v1",
   "name": "connections-review-connector",
-  "version": "1.3.0",
+  "version": "1.4.0",
   "displayName": "Review a connector",
   "description": "Reviews a connections connector for the administrator about to enable it: what agents can do with it, and what in its rules looks wrong.",
   "category": "authoring",

@@ -20,10 +20,23 @@ input[type=text],input[type=password],textarea{font:inherit;width:100%;border:1p
 textarea{font-family:ui-monospace,Menlo,monospace;font-size:13px;min-height:220px}pre{white-space:pre-wrap;word-break:break-word;background:var(--card);border:1px solid var(--line);border-radius:8px;padding:10px;font-size:13px}
 .msg{border-left:3px solid var(--accent);padding:6px 12px;background:var(--card);margin:0 0 16px}.err{border-left-color:var(--danger)}
 .ai{border-left:3px solid var(--accent);padding:6px 12px;margin:10px 0 0;background:var(--bg);border-radius:0 8px 8px 0}.ai ul{margin:4px 0;padding-left:20px}.sev-high{color:var(--danger);font-weight:600}.sev-medium{color:var(--fg);font-weight:600}.sev-low{color:var(--muted)}
+.spin{display:inline-block;width:12px;height:12px;border:2px solid var(--line);border-top-color:var(--accent);border-radius:50%;animation:spin .8s linear infinite;vertical-align:-1px}@keyframes spin{to{transform:rotate(360deg)}}
+button[disabled]{opacity:.6;cursor:progress}
 label{display:block;margin:6px 0 2px;font-size:13px;color:var(--muted)}table{border-collapse:collapse;width:100%;font-size:13px}td,th{border-bottom:1px solid var(--line);padding:4px 6px;text-align:left}
 </style>
 </head>
 <body><main>
 {{if .Msg}}<p class="msg{{if .Err}} err{{end}}" role="status">{{.Msg}}</p>{{end}}
 {{template "body" .}}
-</main></body></html>{{end}}
+</main>
+<script>
+// A form being sent says so at once: its button is held and tells what it
+// waits for (data-busy), so a slow answer is never taken for a missed click.
+document.addEventListener("submit", function (e) {
+  var b = e.submitter || e.target.querySelector("button");
+  if (!b) return;
+  if (b.name) { var h = document.createElement("input"); h.type = "hidden"; h.name = b.name; h.value = b.value; e.target.appendChild(h); }
+  setTimeout(function () { b.disabled = true; b.textContent = b.getAttribute("data-busy") || "Working…"; }, 0);
+});
+</script>
+</body></html>{{end}}
