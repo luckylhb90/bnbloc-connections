@@ -24,15 +24,15 @@ type Grant struct {
 	Reach string `json:"reach"`
 	// Scopes: connector.Write when an OAuth sign-in granted the write
 	// scopes too (a change can be made), else the read ones only.
-	Scopes        string `json:"scopes,omitempty"`
-	RefreshToken  string `json:"refreshToken,omitempty"`
-	AccessToken   string `json:"accessToken,omitempty"`
-	ExpiresAtMs   int64  `json:"expiresAtMs,omitempty"`
-	APIKey        string `json:"apiKey,omitempty"`
+	Scopes       string `json:"scopes,omitempty"`
+	RefreshToken string `json:"refreshToken,omitempty"`
+	AccessToken  string `json:"accessToken,omitempty"`
+	ExpiresAtMs  int64  `json:"expiresAtMs,omitempty"`
+	APIKey       string `json:"apiKey,omitempty"`
 	// Extra: the values the member pasted beside the key (connector.Extra).
-	Extra map[string]string `json:"extra,omitempty"`
-	ProviderGrant string `json:"providerGrant,omitempty"`
-	ConnectedAtMs int64  `json:"connectedAtMs"`
+	Extra         map[string]string `json:"extra,omitempty"`
+	ProviderGrant string            `json:"providerGrant,omitempty"`
+	ConnectedAtMs int64             `json:"connectedAtMs"`
 }
 
 // canChange reports whether the grant's credentials can make a change in
