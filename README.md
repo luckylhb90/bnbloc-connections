@@ -100,9 +100,17 @@ and reviews the drafts agents post there.
     it with a placeholder secret), gets `timestamp` (milliseconds) when it
     has none and `param` set to the hex HMAC-SHA256, keyed by the secret, of
     its query string followed by its form body. The secret's kind decides
-    the signature, nothing to configure: a shared secret signs HMAC-SHA256
-    (hex), a PEM private key (pasted on one line or several) Ed25519 or RSA
-    SHA-256 (base64). The secret is never sent; sent from the member's
+    the algorithm: a shared secret signs HMAC-SHA256, a PEM private key
+    (pasted on one line or several) Ed25519 or RSA SHA-256. `sign.in`
+    `"query"` (default: `param` at the end of the query string) or
+    `"header"` (`header`, with the time in the `timestamp` header);
+    `payload` is what is signed (empty: the query string then the form body;
+    else a template of `{timestamp}`, `{method}`, `{path}`, `{query}`,
+    `{pathQuery}`, `{body}`, `{key}` and literal text); `timestampFormat`
+    `ms` (default), `s` or `iso`; `encoding` `hex` or `base64`; `paths`
+    (empty: every request). `apiKey.extra` asks the member for more values
+    beside the key (`{name, label, header}`: a passphrase), carried in their
+    headers. The secret is never sent; sent from the member's
     computer, the bridge gets the exact signed query and body
     (`Send.RawQuery`, `ReplaceBody`).
   - `provider`: another component speaks the protocol (`url`, `app`); see
@@ -121,6 +129,9 @@ and reviews the drafts agents post there.
   it. The admin page switches it per connector.
 - `cliEnv`: placeholders a CLI needs before it runs (every credential sent
   to a connector host is replaced).
+- `headers`: set on every request to the system whatever the agent sent
+  (a mode its API takes in a header, such as `x-simulated-trading: 1`);
+  never a credential, `Host` or a length.
 - `answers`: requests answered here and never sent, `{method, path,
   status, contentType, body}` (status 200 and JSON by default): a CLI's
   own sign-in step (a token exchange) whose credential the component holds,

@@ -262,7 +262,18 @@ func (s *Service) fromMember(ctx context.Context, t component.Turn, p principal,
 		// Signed here over the exact query and body the bridge sends.
 		var changed bool
 		send.Query = nil
-		send.RawQuery, send.Body, changed = signRequest(c, auth, u, in.Body, headerValue(in.Header, "Content-Type"), s.now())
+		var signHeaders http.Header
+		send.RawQuery, send.Body, signHeaders, changed = signRequest(c, auth, in.Method, u, in.Body, headerValue(in.Header, "Content-Type"), s.now())
+		if len(signHeaders) > 0 {
+			merged := map[string][]string{}
+			for k, v := range auth.header {
+				merged[k] = v
+			}
+			for k, v := range signHeaders {
+				merged[k] = v
+			}
+			send.Header = merged
+		}
 		send.ReplaceBody = changed
 		if !changed {
 			send.Body = nil
@@ -283,8 +294,9 @@ func (s *Service) call(ctx context.Context, c connector.Connector, org string, p
 		}
 		target := *u
 		body := in.Body
+		var signHeaders http.Header
 		if a := c.Connect.APIKey; a != nil && a.Sign != nil {
-			target.RawQuery, body, _ = signRequest(c, auth, u, in.Body, headerValue(in.Header, "Content-Type"), s.now())
+			target.RawQuery, body, signHeaders, _ = signRequest(c, auth, in.Method, u, in.Body, headerValue(in.Header, "Content-Type"), s.now())
 		} else if len(auth.query) > 0 {
 			q := target.Query()
 			for k, v := range auth.query {
@@ -304,6 +316,9 @@ func (s *Service) call(ctx context.Context, c connector.Connector, org string, p
 		}
 		req.Header.Del("Content-Length")
 		for k, v := range auth.header {
+			req.Header[k] = v
+		}
+		for k, v := range signHeaders {
 			req.Header[k] = v
 		}
 		resp, err := s.upstream().Do(req)

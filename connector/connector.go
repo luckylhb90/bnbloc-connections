@@ -39,6 +39,10 @@ type Connector struct {
 	Policy      Policy            `json:"policy"`
 	ExpiredWhen []Expired         `json:"expiredWhen,omitempty"`
 	CLIEnv      map[string]string `json:"cliEnv,omitempty"`
+	// Headers are set on every request to the system, whatever the agent
+	// sent (a mode the system's API takes in a header, such as its
+	// simulated trading).
+	Headers map[string]string `json:"headers,omitempty"`
 	// Answers are requests the component answers itself, never sending
 	// them: a CLI's own sign-in step whose credential the component holds
 	// (it exchanges the key itself, APIKey.Exchange).
@@ -117,20 +121,46 @@ type APIKey struct {
 	// Sign: the key is "<key>:<secret>"; the key is carried as In says and
 	// the component signs requests with the secret (Sign).
 	Sign *Sign `json:"sign,omitempty"`
+	// Extra are values the member pastes beside the key (a passphrase).
+	Extra []Extra `json:"extra,omitempty"`
 }
 
-// Sign signs a request with the member's secret: one whose path matches
-// Paths, or that already carries Param (a client library that signed it
-// with a placeholder secret), gets Timestamp (milliseconds) when it has
-// none, and Param set to the signature of its query string followed by its
-// form body (Param left out of both), at the end of the query string. The
-// secret's kind decides the signature, with nothing to configure: a shared
-// secret signs HMAC-SHA256 (hex); a PEM private key signs Ed25519 or RSA
-// PKCS#1 v1.5 SHA-256 (base64).
+// Sign signs a request with the member's secret. It applies to a request
+// whose path matches Paths (every request when Paths is empty), or that
+// already carries its signature (a client library that signed it with a
+// placeholder secret, replaced here).
+//
+//   - In "query" (default): the signature goes in the query string as
+//     Param, at its end; Timestamp names a query parameter added when the
+//     request has none.
+//   - In "header": the signature goes in the Header header and the time in
+//     the Timestamp header; the query string is left as it is.
+//
+// Payload is what is signed: empty for the query string followed by the
+// form body (signature left out of both); else a template of {timestamp},
+// {method}, {path}, {query}, {pathQuery} (the path with "?query" when
+// there is one), {body} and {key}, and literal text. TimestampFormat:
+// "ms" (default), "s", "iso" (UTC with milliseconds, 2020-12-08T09:08:57.715Z).
+// The secret's kind decides the algorithm: a shared secret HMAC-SHA256, a
+// PEM private key Ed25519 or RSA PKCS#1 v1.5 SHA-256. Encoding: "hex" or
+// "base64" (default: hex for HMAC, base64 for a private key).
 type Sign struct {
-	Param     string   `json:"param"`
-	Timestamp string   `json:"timestamp,omitempty"`
-	Paths     []string `json:"paths,omitempty"`
+	In              string   `json:"in,omitempty"`
+	Param           string   `json:"param,omitempty"`
+	Header          string   `json:"header,omitempty"`
+	Timestamp       string   `json:"timestamp,omitempty"`
+	TimestampFormat string   `json:"timestampFormat,omitempty"`
+	Payload         string   `json:"payload,omitempty"`
+	Encoding        string   `json:"encoding,omitempty"`
+	Paths           []string `json:"paths,omitempty"`
+}
+
+// Extra is one more value a member pastes with their key (a passphrase),
+// carried in Header on every request.
+type Extra struct {
+	Name   string `json:"name"`
+	Label  string `json:"label"`
+	Header string `json:"header"`
 }
 
 // Exchange trades a member's key for a short-lived token at one of the
@@ -281,6 +311,11 @@ func (c Connector) Validate() error {
 	if len(c.Guide) > MaxGuide {
 		return fmt.Errorf("guide: at most %d bytes", MaxGuide)
 	}
+	for k, v := range c.Headers {
+		if !headerName(k) || reservedHeader(k) || strings.ContainsAny(v, "\r\n") || len(v) > 256 {
+			return fmt.Errorf("headers: %q: a header that is no credential, Host or length, with a one-line value", k)
+		}
+	}
 	for _, a := range c.Answers {
 		if !slices.Contains(methods, a.Method) || !strings.HasPrefix(a.Path, "/") {
 			return fmt.Errorf("answers: %s %s: a method and a path starting with /", a.Method, a.Path)
@@ -362,13 +397,16 @@ func (c Connect) validate() error {
 			return fmt.Errorf("apiKey: %w", err)
 		}
 		if sg := a.Sign; sg != nil {
-			if strings.TrimSpace(sg.Param) == "" || a.Exchange != nil || a.In == "basic" {
-				return errors.New("apiKey.sign: a param, with no exchange and a key not sent as basic")
+			if err := sg.validate(); err != nil {
+				return fmt.Errorf("apiKey.sign: %w", err)
 			}
-			for _, p := range sg.Paths {
-				if !strings.HasPrefix(p, "/") {
-					return fmt.Errorf("apiKey.sign.paths: %q must start with /", p)
-				}
+			if a.Exchange != nil || a.In == "basic" {
+				return errors.New("apiKey.sign: no exchange, and a key not sent as basic")
+			}
+		}
+		for _, x := range a.Extra {
+			if !nameRE.MatchString(x.Name) || strings.TrimSpace(x.Label) == "" || !headerName(x.Header) {
+				return fmt.Errorf("apiKey.extra %q: a name (a-z, 0-9, -), a label and a header", x.Name)
 			}
 		}
 		if x := a.Exchange; x != nil {
@@ -399,6 +437,59 @@ func (c Connect) validate() error {
 		return errors.New(`kind: "oauth2", "apiKey" or "provider"`)
 	}
 	return nil
+}
+
+func (sg Sign) validate() error {
+	switch sg.In {
+	case "", "query":
+		if strings.TrimSpace(sg.Param) == "" {
+			return errors.New("a query signature names its param")
+		}
+	case "header":
+		if !headerName(sg.Header) || (sg.Timestamp != "" && !headerName(sg.Timestamp)) {
+			return errors.New("a header signature names its header (and its timestamp's)")
+		}
+	default:
+		return errors.New(`in: "query" or "header"`)
+	}
+	switch sg.TimestampFormat {
+	case "", "ms", "s", "iso":
+	default:
+		return errors.New(`timestampFormat: "ms", "s" or "iso"`)
+	}
+	switch sg.Encoding {
+	case "", "hex", "base64":
+	default:
+		return errors.New(`encoding: "hex" or "base64"`)
+	}
+	for _, p := range sg.Paths {
+		if !strings.HasPrefix(p, "/") {
+			return fmt.Errorf("paths: %q must start with /", p)
+		}
+	}
+	return nil
+}
+
+// headerName reports an HTTP header name a connector may name.
+func headerName(h string) bool {
+	if h == "" || len(h) > 64 {
+		return false
+	}
+	for _, r := range h {
+		if !(r == '-' || r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9') {
+			return false
+		}
+	}
+	return true
+}
+
+// reservedHeader is a header a connector's Headers may not set.
+func reservedHeader(h string) bool {
+	switch strings.ToLower(h) {
+	case "authorization", "cookie", "proxy-authorization", "host", "content-length", "transfer-encoding", "connection":
+		return true
+	}
+	return false
 }
 
 // carried checks how a credential is carried: "bearer", "header" or
@@ -572,8 +663,19 @@ func (c Connector) IsExpired(status int, location string, body []byte) bool {
 // one is removed from what an agent sends.
 func (c Connector) CredentialHeaders() []string {
 	out := []string{"Authorization", "Cookie", "Proxy-Authorization"}
-	if a := c.Connect.APIKey; a != nil && a.In == "header" {
-		out = append(out, a.Name)
+	if a := c.Connect.APIKey; a != nil {
+		if a.In == "header" {
+			out = append(out, a.Name)
+		}
+		if sg := a.Sign; sg != nil && sg.In == "header" {
+			out = append(out, sg.Header)
+			if sg.Timestamp != "" {
+				out = append(out, sg.Timestamp)
+			}
+		}
+		for _, x := range a.Extra {
+			out = append(out, x.Header)
+		}
 	}
 	return out
 }

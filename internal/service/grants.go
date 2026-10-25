@@ -29,6 +29,8 @@ type Grant struct {
 	AccessToken   string `json:"accessToken,omitempty"`
 	ExpiresAtMs   int64  `json:"expiresAtMs,omitempty"`
 	APIKey        string `json:"apiKey,omitempty"`
+	// Extra: the values the member pasted beside the key (connector.Extra).
+	Extra map[string]string `json:"extra,omitempty"`
 	ProviderGrant string `json:"providerGrant,omitempty"`
 	ConnectedAtMs int64  `json:"connectedAtMs"`
 }
@@ -67,8 +69,9 @@ type cachedAuth struct {
 	query  url.Values
 	until  time.Time
 	at     time.Time
-	// secret signs each request (connector.Sign); never sent.
-	secret string
+	// key and secret sign each request (connector.Sign); the secret is
+	// never sent.
+	key, secret string
 }
 
 func (s *Service) cachedAuthFor(k grantKey) (cachedAuth, bool) {
@@ -149,7 +152,7 @@ func (s *Service) credentials(ctx context.Context, c connector.Connector, org st
 		if c.Connect.APIKey.Sign != nil {
 			key, secret := splitKeySecret(g.APIKey)
 			a = apiKeyAuth(*c.Connect.APIKey, key)
-			a.secret, a.until = secret, s.now().Add(time.Hour)
+			a.key, a.secret, a.until = key, secret, s.now().Add(time.Hour)
 			break
 		}
 		a = apiKeyAuth(*c.Connect.APIKey, g.APIKey)
@@ -163,6 +166,21 @@ func (s *Service) credentials(ctx context.Context, c connector.Connector, org st
 	}
 	if err != nil {
 		return cachedAuth{}, err
+	}
+	// What every request to the system carries beside the credential: the
+	// member's extra values (a passphrase) and the connector's headers.
+	if a.header == nil {
+		a.header = http.Header{}
+	}
+	if ak := c.Connect.APIKey; ak != nil {
+		for _, x := range ak.Extra {
+			if v := g.Extra[x.Name]; v != "" {
+				a.header.Set(x.Header, v)
+			}
+		}
+	}
+	for k, v := range c.Headers {
+		a.header.Set(k, v)
 	}
 	a.at = s.now()
 	s.keepAuth(k, a)

@@ -97,8 +97,10 @@ type systemRow struct {
 	Kind      string
 	Help      string
 	Highlight bool
-	// Signs: the key comes with a secret (connector.Sign).
+	// Signs: the key comes with a secret (connector.Sign); Extra: the
+	// other values pasted beside it.
 	Signs bool
+	Extra []connector.Extra
 	// Workers serve the member's own agents here; Chosen is the one they
 	// chose to act as ("": themselves).
 	Workers []Worker
@@ -124,7 +126,13 @@ func (s *Service) connectionsPage(w http.ResponseWriter, r *http.Request, m comp
 		if sec := strings.TrimSpace(form.Get("secret")); sec != "" {
 			key = strings.TrimSpace(key) + ":" + sec
 		}
-		s.connect(w, ctx, m, form.Get("system"), form.Get("reach"), key)
+		extra := map[string]string{}
+		for k, v := range form {
+			if name, ok := strings.CutPrefix(k, "extra-"); ok && len(v) > 0 && strings.TrimSpace(v[0]) != "" {
+				extra[name] = strings.TrimSpace(v[0])
+			}
+		}
+		s.connect(w, ctx, m, form.Get("system"), form.Get("reach"), key, extra)
 		return
 	case "disconnect":
 		s.disconnect(w, ctx, m, form.Get("system"))
@@ -177,7 +185,7 @@ func (s *Service) connectionsPage(w http.ResponseWriter, r *http.Request, m comp
 		row := systemRow{SystemView: v, Kind: c.Connect.Kind, Highlight: q.Get("system") == v.Name, Workers: ws, Chosen: s.choice(ctx, m.Subject, m.Org, c.Name)}
 		switch {
 		case c.Connect.APIKey != nil:
-			row.Help, row.Signs = c.Connect.APIKey.Help, c.Connect.APIKey.Sign != nil
+			row.Help, row.Signs, row.Extra = c.Connect.APIKey.Help, c.Connect.APIKey.Sign != nil, c.Connect.APIKey.Extra
 		case c.Connect.Provider != nil:
 			row.Help = c.Connect.Provider.Help
 		}
@@ -223,8 +231,8 @@ func (s *Service) connectionsPage(w http.ResponseWriter, r *http.Request, m comp
 	})
 }
 
-func (s *Service) connect(w http.ResponseWriter, ctx context.Context, m component.Member, name, reach, key string) {
-	r := s.connectTo(ctx, m, name, reach, key)
+func (s *Service) connect(w http.ResponseWriter, ctx context.Context, m component.Member, name, reach, key string, extra map[string]string) {
+	r := s.connectTo(ctx, m, name, reach, key, extra)
 	if r.audit != nil {
 		audit(w, *r.audit)
 	}
@@ -248,7 +256,7 @@ type connectResult struct {
 // connectTo connects the member to a system: a sign-in to start (OAuth), a
 // key (apiKey), or the provider's connect. One owner for the page and the
 // card's in-place Connect.
-func (s *Service) connectTo(ctx context.Context, m component.Member, name, reach, key string) connectResult {
+func (s *Service) connectTo(ctx context.Context, m component.Member, name, reach, key string, extra map[string]string) connectResult {
 	c, ok := s.connectorNamed(ctx, m.Org, name)
 	if !ok {
 		return connectResult{msg: "That system is not enabled.", err: true}
@@ -285,7 +293,18 @@ func (s *Service) connectTo(ctx context.Context, m component.Member, name, reach
 		if key == "" || len(key) > 8192 {
 			return connectResult{msg: "Paste the key to connect " + c.DisplayName + ".", err: true}
 		}
-		return connected(Grant{Connector: c.Name, Reach: reach, APIKey: key, ConnectedAtMs: s.now().UnixMilli()})
+		g := Grant{Connector: c.Name, Reach: reach, APIKey: key, ConnectedAtMs: s.now().UnixMilli()}
+		for _, x := range c.Connect.APIKey.Extra {
+			v := strings.TrimSpace(extra[x.Name])
+			if v == "" || len(v) > 1024 {
+				return connectResult{msg: "Fill in the " + x.Label + " to connect " + c.DisplayName + ".", err: true}
+			}
+			if g.Extra == nil {
+				g.Extra = map[string]string{}
+			}
+			g.Extra[x.Name] = v
+		}
+		return connected(g)
 	case connector.KindProvider:
 		a, err := s.callProvider(ctx, c, m.Org, provider.ConnectPath, provider.Call{Member: m.Subject, Org: m.Org, Reach: reach})
 		switch {

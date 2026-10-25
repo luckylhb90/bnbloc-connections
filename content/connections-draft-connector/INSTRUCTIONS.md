@@ -14,10 +14,16 @@ Reply with only a JSON object holding exactly these keys:
   - `hosts`: the exact API hosts, lower case, no scheme, port or wildcard.
   - `connect`, one kind:
     - `{"kind":"apiKey","apiKey":{"in":"bearer"|"header"|"query"|"basic","name":"<header or query name>","prefix":"","help":"where a member makes a key"}}`;
-      add `"sign":{"param":"signature","timestamp":"timestamp","paths":[...]}`
-      when the API signs requests with a secret (HMAC or a private key over
-      the query string and form body); the member then pastes the key and
-      its secret.
+      add `"sign"` when the API signs requests with a secret, and the
+      member then pastes the key and its secret:
+      - in the query string over the query and form body:
+        `{"param":"signature","timestamp":"timestamp","paths":[…]}`;
+      - in headers over a template:
+        `{"in":"header","header":"<signature header>","timestamp":"<time header>","timestampFormat":"ms"|"s"|"iso","payload":"{timestamp}{method}{pathQuery}{body}","encoding":"hex"|"base64","paths":[…]}`
+        (template parts `{timestamp}`, `{method}`, `{path}`, `{query}`,
+        `{pathQuery}`, `{body}`, `{key}` and literal text).
+      Add `"extra":[{"name":"passphrase","label":"Passphrase","header":"<header>"}]`
+      for any other value the API needs with the key.
     - `{"kind":"oauth2","oauth2":{"issuer":"https://…"}}` with discovery, or
       `authorizationEndpoint` and `tokenEndpoint`; `clientId`:
       `"SET-YOUR-CLIENT-ID"`; `scopes`: `{"read":[…],"write":[…]}`;
@@ -34,6 +40,9 @@ Reply with only a JSON object holding exactly these keys:
     when a dead sign-in is not a 401.
   - `cliEnv` (optional): placeholders a CLI needs before it runs, values
     `"connected"`.
+  - `headers` (optional): headers every request carries, such as a mode
+    the API takes in a header (`{"x-simulated-trading":"1"}`); never a
+    credential.
   - `guide`: Markdown for agents: what the API is, and `curl` examples of
     the main reads and changes, with no credential in them (bnbloc adds the
     member's).

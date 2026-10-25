@@ -54,6 +54,8 @@
     <input id="key-{{.Name}}" type="password" name="key" autocomplete="off" required>
     {{if .Signs}}<label for="secret-{{.Name}}">Secret key</label>
     <input id="secret-{{.Name}}" type="password" name="secret" autocomplete="off" required>{{end}}
+    {{$sys := .Name}}{{range .Extra}}<label for="extra-{{$sys}}-{{.Name}}">{{.Label}}</label>
+    <input id="extra-{{$sys}}-{{.Name}}" type="password" name="extra-{{.Name}}" autocomplete="off" required>{{end}}
     <p><button class="primary">Connect</button></p>
   </form>
   {{else if and (not .Connected) .Help}}<div class="muted">{{.Help}}</div>{{end}}

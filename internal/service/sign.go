@@ -11,6 +11,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"errors"
+	"net/http"
 	"net/url"
 	"strconv"
 	"strings"
@@ -57,48 +58,108 @@ func hasParam(raw, name string) bool {
 	return false
 }
 
-// signed signs one request (rawQuery, its form body) when the connector's
-// Sign applies to it, answering the query and the body to send.
-func signed(sg *connector.Sign, secret, path, rawQuery string, body []byte, form bool, now time.Time) (string, []byte, bool) {
-	q, inQuery := withoutParam(rawQuery, sg.Param)
-	b := string(body)
-	inBody := false
-	if form {
-		b, inBody = withoutParam(b, sg.Param)
+// signRequestIn is one request to sign: its method, path, query string
+// and body (form: a form body), the member's key and secret, the time.
+type signRequestIn struct {
+	method, path, rawQuery string
+	body                   []byte
+	form                   bool
+	key, secret            string
+	now                    time.Time
+}
+
+// signOut is a request as signed: the query string and body to send, the
+// headers to set, whether it was signed.
+type signOut struct {
+	rawQuery string
+	body     []byte
+	headers  http.Header
+	ok       bool
+}
+
+// signed signs one request when the connector's Sign applies to it
+// (connector.Sign: where the signature goes, what is signed, how).
+func signed(sg *connector.Sign, in signRequestIn) signOut {
+	out := signOut{rawQuery: in.rawQuery, body: in.body}
+	if in.secret == "" {
+		return out
 	}
-	applies := inQuery || inBody
-	for _, p := range sg.Paths {
-		applies = applies || connector.Glob(p, path)
-	}
-	if !applies || secret == "" {
-		return rawQuery, body, false
-	}
-	if sg.Timestamp != "" && !hasParam(q, sg.Timestamp) && !(form && hasParam(b, sg.Timestamp)) {
-		ts := sg.Timestamp + "=" + strconv.FormatInt(now.UnixMilli(), 10)
-		if q == "" {
-			q = ts
-		} else {
-			q += "&" + ts
+	q, b := in.rawQuery, string(in.body)
+	carried := false
+	if sg.In == "header" {
+		carried = false // a placeholder signature header is replaced anyway
+	} else {
+		var inQuery, inBody bool
+		q, inQuery = withoutParam(q, sg.Param)
+		if in.form {
+			b, inBody = withoutParam(b, sg.Param)
 		}
+		carried = inQuery || inBody
+	}
+	applies := carried || len(sg.Paths) == 0
+	for _, p := range sg.Paths {
+		applies = applies || connector.Glob(p, in.path)
+	}
+	if !applies {
+		return out
+	}
+	ts := timestamp(sg.TimestampFormat, in.now)
+	if sg.In != "header" && sg.Timestamp != "" && !hasParam(q, sg.Timestamp) && !(in.form && hasParam(b, sg.Timestamp)) {
+		q = joinQuery(q, sg.Timestamp+"="+url.QueryEscape(ts))
 	}
 	payload := q
-	if form {
+	if in.form {
 		payload += b
 	}
-	value, err := signature(secret, []byte(payload))
+	if sg.Payload != "" || sg.In == "header" {
+		tmpl := sg.Payload
+		if tmpl == "" {
+			tmpl = "{timestamp}{method}{pathQuery}{body}"
+		}
+		pathQuery := in.path
+		if q != "" {
+			pathQuery += "?" + q
+		}
+		payload = strings.NewReplacer("{timestamp}", ts, "{method}", strings.ToUpper(in.method), "{path}", in.path,
+			"{query}", q, "{pathQuery}", pathQuery, "{body}", b, "{key}", in.key).Replace(tmpl)
+	}
+	value, err := signature(in.secret, []byte(payload), sg.Encoding)
 	if err != nil {
-		return rawQuery, body, false
+		return out
 	}
-	sig := sg.Param + "=" + url.QueryEscape(value)
+	out.ok = true
+	if sg.In == "header" {
+		out.headers = http.Header{}
+		out.headers.Set(sg.Header, value)
+		if sg.Timestamp != "" {
+			out.headers.Set(sg.Timestamp, ts)
+		}
+		return out
+	}
+	out.rawQuery = joinQuery(q, sg.Param+"="+url.QueryEscape(value))
+	if in.form {
+		out.body = []byte(b)
+	}
+	return out
+}
+
+func joinQuery(q, part string) string {
 	if q == "" {
-		q = sig
-	} else {
-		q += "&" + sig
+		return part
 	}
-	if form {
-		return q, []byte(b), true
+	return q + "&" + part
+}
+
+// timestamp is the time a signature carries: milliseconds (default),
+// seconds, or ISO 8601 UTC with milliseconds.
+func timestamp(format string, now time.Time) string {
+	switch format {
+	case "s":
+		return strconv.FormatInt(now.Unix(), 10)
+	case "iso":
+		return now.UTC().Format("2006-01-02T15:04:05.000Z")
 	}
-	return q, body, true
+	return strconv.FormatInt(now.UnixMilli(), 10)
 }
 
 // headerValue is a request header's first value, any case of its name.
@@ -112,27 +173,37 @@ func headerValue(h map[string][]string, name string) string {
 }
 
 // signature signs payload with the secret, by its kind: a PEM private key
-// signs Ed25519 or RSA PKCS#1 v1.5 SHA-256 (base64); any other secret is
-// an HMAC-SHA256 key (hex).
-func signature(secret string, payload []byte) (string, error) {
-	if !strings.Contains(secret, "-----BEGIN") {
+// signs Ed25519 or RSA PKCS#1 v1.5 SHA-256 (base64 by default); any other
+// secret is an HMAC-SHA256 key (hex by default). encoding "hex" or
+// "base64" chooses.
+func signature(secret string, payload []byte, encoding string) (string, error) {
+	var raw []byte
+	pem := strings.Contains(secret, "-----BEGIN")
+	if !pem {
 		mac := hmac.New(sha256.New, []byte(secret))
 		mac.Write(payload)
-		return hex.EncodeToString(mac.Sum(nil)), nil
+		raw = mac.Sum(nil)
+	} else {
+		key, err := privateKey(secret)
+		if err != nil {
+			return "", err
+		}
+		switch k := key.(type) {
+		case ed25519.PrivateKey:
+			raw = ed25519.Sign(k, payload)
+		case *rsa.PrivateKey:
+			sum := sha256.Sum256(payload)
+			if raw, err = rsa.SignPKCS1v15(rand.Reader, k, crypto.SHA256, sum[:]); err != nil {
+				return "", err
+			}
+		default:
+			return "", errors.New("the private key is neither Ed25519 nor RSA")
+		}
 	}
-	key, err := privateKey(secret)
-	if err != nil {
-		return "", err
+	if encoding == "base64" || (encoding == "" && pem) {
+		return base64.StdEncoding.EncodeToString(raw), nil
 	}
-	switch k := key.(type) {
-	case ed25519.PrivateKey:
-		return base64.StdEncoding.EncodeToString(ed25519.Sign(k, payload)), nil
-	case *rsa.PrivateKey:
-		sum := sha256.Sum256(payload)
-		sig, err := rsa.SignPKCS1v15(rand.Reader, k, crypto.SHA256, sum[:])
-		return base64.StdEncoding.EncodeToString(sig), err
-	}
-	return "", errors.New("the private key is neither Ed25519 nor RSA")
+	return hex.EncodeToString(raw), nil
 }
 
 // privateKey reads a PEM private key as pasted: its line breaks may have
@@ -172,24 +243,18 @@ func checkSecret(secret string) error {
 	return nil
 }
 
-// signRequest is the query string and body a signing connector sends for
-// in (unchanged for another connector): the credentials' query added, then
-// signed with their secret. changed reports a body other than in's.
-func signRequest(c connector.Connector, auth cachedAuth, u *url.URL, in []byte, contentType string, now time.Time) (rawQuery string, body []byte, changed bool) {
+// signRequest is a request as a signing connector sends it (unchanged for
+// another connector): the credentials' query added, then signed with their
+// secret. changed reports a body other than in's.
+func signRequest(c connector.Connector, auth cachedAuth, method string, u *url.URL, in []byte, contentType string, now time.Time) (rawQuery string, body []byte, headers http.Header, changed bool) {
 	rawQuery, body = u.RawQuery, in
 	if len(auth.query) > 0 {
-		extra := auth.query.Encode()
-		if rawQuery == "" {
-			rawQuery = extra
-		} else {
-			rawQuery += "&" + extra
-		}
+		rawQuery = joinQuery(rawQuery, auth.query.Encode())
 	}
 	if a := c.Connect.APIKey; a != nil && a.Sign != nil {
 		form := strings.HasPrefix(strings.ToLower(contentType), "application/x-www-form-urlencoded")
-		var ok bool
-		rawQuery, body, ok = signed(a.Sign, auth.secret, u.Path, rawQuery, in, form, now)
-		changed = ok && form
+		out := signed(a.Sign, signRequestIn{method: method, path: u.Path, rawQuery: rawQuery, body: in, form: form, key: auth.key, secret: auth.secret, now: now})
+		return out.rawQuery, out.body, out.headers, out.ok && form && a.Sign.In != "header"
 	}
-	return rawQuery, body, changed
+	return rawQuery, body, nil, false
 }
