@@ -40,7 +40,7 @@
 <form method="post" action="{{$.Base}}delete"><input type="hidden" name="name" value="{{.C.Name}}"><button class="danger">Remove</button></form></div></div>
 {{template "review" .ReviewBlock}}
 <form method="post" action="{{$.Base}}review"><input type="hidden" name="name" value="{{.C.Name}}"><button>Review again</button></form>
-{{if and .C.Test .C.Enabled (not .C.FromMember)}}<form method="post" action="{{$.Base}}try"><input type="hidden" name="name" value="{{.C.Name}}"><button data-busy="Trying…">Try it</button> <span class="muted">sends {{or .C.Test.Method "GET"}} {{.C.Test.Path}} with your own connection</span></form>{{end}}
+{{if and .C.Test .C.Enabled}}<form method="post" action="{{$.Base}}try"><input type="hidden" name="name" value="{{.C.Name}}"><button data-busy="Trying…">Try it</button> <span class="muted">sends {{or .C.Test.Method "GET"}} {{.C.Test.Path}} with your own connection{{if .C.FromMember}}, from your computer{{end}}</span></form>{{if .Try}}<div class="muted">Last try: {{.Try}}</div>{{end}}{{end}}
 {{if or .Refused .Allowed .Proposal.Rules .Proposal.Pending .Proposal.Error}}<div class="ai"><div class="muted">From use: {{.Refused}} refused request{{if ne .Refused 1}}s{{end}} no rule classifies, {{.Allowed}} allowed change{{if ne .Allowed 1}}s{{end}}{{if .Proposal.Pending}} · suggesting rules…{{end}}</div>
 {{if .Proposal.Error}}<div class="muted">{{.Proposal.Error}}</div>{{end}}
 {{if .Proposal.Notes}}<div>{{.Proposal.Notes}}</div>{{end}}

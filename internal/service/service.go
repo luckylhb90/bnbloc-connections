@@ -84,6 +84,7 @@ func (s *Service) Handler() http.Handler {
 	mux.HandleFunc(component.ServicePagesPath+"/", s.member(s.handlePage))
 	mux.HandleFunc("POST "+component.ServiceCardsPrefix, s.member(s.handleCard))
 	mux.HandleFunc(component.ServiceCallbackPrefix+"oauth", s.handleOAuthCallback)
+	mux.HandleFunc("POST "+component.ServiceSendEgressPath, s.sendCall(s.handleSendEgress))
 	if s.BasePath == "" {
 		return mux
 	}
@@ -152,6 +153,22 @@ func (s *Service) turn(h turnHandler) http.HandlerFunc {
 			return
 		}
 		h(w, r, t, body)
+	}
+}
+
+// sendCall serves a send's egress call: the attested send and the body.
+func (s *Service) sendCall(h func(w http.ResponseWriter, r *http.Request, sd component.Send, body []byte)) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		body, ok := s.read(w, r, component.SendHeader)
+		if !ok {
+			return
+		}
+		var sd component.Send
+		if err := component.DecodeHeader(r.Header.Get(component.SendHeader), &sd); err != nil || sd.Org == "" || sd.Member == "" || sd.ID == "" {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "no attested send"})
+			return
+		}
+		h(w, r, sd, body)
 	}
 }
 

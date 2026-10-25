@@ -136,8 +136,12 @@ and reviews the drafts agents post there.
 - `test`: one read that proves a connection works (`GET` or `HEAD` of a
   path, with its query, on the first host; a read rule must take it). It
   runs right after a member or a worker connects ("It answers", or what
-  the system said), and on the admin's **Try it**. Not for a connector
-  that sends from members' computers.
+  the system said), and on the admin's **Try it**. For a connector that
+  sends from members' computers it goes out from the person's own
+  computer (bnbloc's sends from a member's computer: their action on the
+  page grants one, their bnbloc desktop app sends it, the answer comes
+  back as the send's report); without the desktop app running, the page
+  says to open it.
 - `answers`: requests answered here and never sent, `{method, path,
   status, contentType, body}` (status 200 and JSON by default): a CLI's
   own sign-in step (a token exchange) whose credential the component holds,
@@ -296,6 +300,8 @@ deprovisioning):
 | `orgs/<org>` | `secrets:<name>` | its client and provider secrets |
 | `orgs/<org>` | `draft:<name>` | an agent's draft |
 | `orgs/<org>` | `try:<name>` | the admin's last Try it (status, one line, no credential) |
+| `orgs/<org>` | `send:<id>` | a try a computer is sending (minutes) |
+| `members/<subject>` | `check:<org>:<name>` | the member's last check after connecting |
 | `members/<subject>` | `grant:<org>:<name>` | the connection (refresh token, key or provider grant; the reach) |
 | `members/<subject>` | `held:<id>` | a held change (a day) |
 | `members/<subject>` | `activity:<org>` | the last 100 calls (method, path, status) |

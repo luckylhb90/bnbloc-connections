@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"strings"
 	"testing"
@@ -115,5 +116,92 @@ func TestConnectorTestIsARead(t *testing.T) {
 		if err := c.Validate(); (err == nil) != tc.ok {
 			t.Errorf("%+v: %v", tc.test, err)
 		}
+	}
+}
+
+// pageAct is a page action carrying the member's grant (component.Member.Act).
+func (fx *fixture) pageAct(admin bool, path string, form url.Values) *httptest.ResponseRecorder {
+	fx.t.Helper()
+	m := member(admin)
+	m.Act = "act-" + path
+	return fx.do(http.MethodPost, path, component.MemberHeader, m, []byte(form.Encode()))
+}
+
+// sendExchange is the member's bridge's egress call for a send.
+func (fx *fixture) sendExchange(id string, in component.EgressRequest) component.EgressResponse {
+	fx.t.Helper()
+	raw, _ := json.Marshal(in)
+	rec := fx.do(http.MethodPost, component.ServiceSendEgressPath, component.SendHeader, component.Send{Org: "home", Member: "maya", ID: id, Origin: "https://bnbloc.example.com"}, raw)
+	var out component.EgressResponse
+	if rec.Code != http.StatusOK || json.Unmarshal(rec.Body.Bytes(), &out) != nil {
+		fx.t.Fatalf("send exchange = %d %s", rec.Code, rec.Body)
+	}
+	return out
+}
+
+// A connector that sends from members' computers is tried from the
+// person's own computer: the admin's Try it asks their desktop app (or says
+// to open it), gets the member's credentials for the one request, and the
+// system's answer, without the credential it echoed, is the review's
+// evidence; a member's connect is checked the same way and their page says
+// so.
+func TestTryFromTheMembersComputer(t *testing.T) {
+	fx := newFixture(t)
+	c := issues()
+	c.SendFrom = connector.SendMember
+	c.Test = &connector.Test{Path: "/api/me"}
+	fx.addConnector(c)
+	var reviewed []string
+	fx.store.assist = func(task string, req component.ServiceAssistRequest) map[string]any {
+		if task == "connections-review-connector" {
+			reviewed = append(reviewed, req.Text)
+		}
+		return map[string]any{"summary": "Reads issues."}
+	}
+	// Connecting without the desktop app running says to open it.
+	rec := fx.pageAct(false, "/pages/connections/connect", url.Values{"system": {"issues"}, "key": {"KEY-123456"}})
+	if msg, _ := msgOf(rec); !strings.Contains(msg, "Open your bnbloc desktop app") {
+		t.Fatalf("connect without the app = %q", msg)
+	}
+	fx.store.computer = true
+	if msg, isErr := msgOf(fx.pageAct(true, "/pages/admin/try", url.Values{"name": {"issues"}})); isErr || !strings.Contains(msg, "sent from your computer") {
+		t.Fatalf("try = %q", msg)
+	}
+	if n := len(fx.store.sends); n != 1 || fx.store.sends[0].URL != "https://example.com/api/me" || fx.store.sends[0].Method != "GET" || fx.store.sends[0].Act == "" {
+		t.Fatalf("sends = %+v", fx.store.sends)
+	}
+	if page := fx.adminPage(); !strings.Contains(page, "waiting for the answer") || !strings.Contains(page, "http-equiv=\"refresh\"") {
+		t.Fatal("the admin page does not show the try under way")
+	}
+	in := component.EgressRequest{Method: "GET", URL: "https://example.com/api/me"}
+	out := fx.sendExchange("send-1", in)
+	if out.Send == nil || out.Send.Header["Authorization"][0] != "Bearer KEY-123456" {
+		t.Fatalf("first answer = %+v", out)
+	}
+	in.Report = &component.EgressReport{Attempt: 1, Status: 400, Body: []byte(`{"code":"50113","msg":"Invalid sign","echo":"Bearer KEY-123456"}`)}
+	if out := fx.sendExchange("send-1", in); !out.Accept {
+		t.Fatalf("to the report = %+v", out)
+	}
+	if raw := string(fx.store.get("orgs/home/try:issues")); !strings.Contains(raw, "50113") || strings.Contains(raw, "KEY-123456") || strings.Contains(raw, `"pending":true`) {
+		t.Fatalf("kept try = %s", raw)
+	}
+	if n := len(reviewed); n == 0 || !strings.Contains(reviewed[n-1], "50113") {
+		t.Fatalf("the review was not given the try: %q", reviewed)
+	}
+	if out := fx.sendExchange("send-1", in); out.Status != http.StatusNotFound {
+		t.Fatalf("a finished send again = %+v", out)
+	}
+
+	// A member's check after connecting.
+	_ = fx.pageAct(false, "/pages/connections/connect", url.Values{"system": {"issues"}, "key": {"KEY-123456"}})
+	if page := fx.page(false, http.MethodGet, "/pages/connections/", nil).Body.String(); !strings.Contains(page, "waiting for the answer") {
+		t.Fatalf("the member's page while checking = %s", page)
+	}
+	in.Report = nil
+	_ = fx.sendExchange("send-2", in)
+	in.Report = &component.EgressReport{Attempt: 1, Status: 200, Body: []byte(`{"user":"maya"}`)}
+	_ = fx.sendExchange("send-2", in)
+	if page := fx.page(false, http.MethodGet, "/pages/connections/", nil).Body.String(); !strings.Contains(page, "answered 200: it works") {
+		t.Fatalf("the member's page after the check = %s", page)
 	}
 }

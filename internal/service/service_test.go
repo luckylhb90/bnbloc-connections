@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/tls"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -32,6 +33,10 @@ type fakeStore struct {
 	// records them.
 	assist func(task string, req component.ServiceAssistRequest) map[string]any
 	runs   []assistRun
+	// computer: the member's desktop app runs (a send is queued); sends
+	// records the sends asked for.
+	computer bool
+	sends    []component.ServiceSendRequest
 }
 
 type assistRun struct {
@@ -64,6 +69,18 @@ func newFakeStore(t *testing.T) (*fakeStore, *httptest.Server) {
 				return
 			}
 			_ = json.NewEncoder(w).Encode(component.ServiceAssistReply{Fields: st.assist(task, req)})
+			return
+		}
+		if r.URL.Path == component.ComponentSendPath {
+			var req component.ServiceSendRequest
+			_ = json.Unmarshal(body, &req)
+			if !st.computer {
+				w.WriteHeader(http.StatusConflict)
+				_, _ = w.Write([]byte(`{"error":"none of maya's bnbloc desktop apps is running"}`))
+				return
+			}
+			st.sends = append(st.sends, req)
+			_ = json.NewEncoder(w).Encode(component.ServiceSendReply{ID: fmt.Sprintf("send-%d", len(st.sends))})
 			return
 		}
 		key := strings.TrimPrefix(r.URL.Path, component.ComponentStorePath)

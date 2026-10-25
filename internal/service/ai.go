@@ -234,7 +234,7 @@ func (s *Service) runReview(org, member string, c connector.Connector, draft boo
 	raw, _ := json.MarshalIndent(reviewed(c), "", "  ")
 	out := Review{Hash: hash, AtMs: s.now().UnixMilli()}
 	text := "The connector an administrator is about to enable (JSON):\n" + string(raw)
-	if t, ok := s.lastTry(ctx, org, c.Name, hash); ok && !t.OK && !draft {
+	if t, ok := s.lastTry(ctx, org, c.Name, hash); ok && !t.OK && !t.Pending && !draft {
 		// Reality's word: what the system answered the connector's test.
 		text += "\n\nThe connector's test request was tried with the administrator's own connection and failed:\n" + t.Line
 		out.Tried = t.Line

@@ -106,6 +106,8 @@ type systemRow struct {
 	// chose to act as ("": themselves).
 	Workers []Worker
 	Chosen  string
+	// Check is the last check of the member's connection ("": none).
+	Check string
 }
 
 type activityRow struct {
@@ -181,9 +183,14 @@ func (s *Service) connectionsPage(w http.ResponseWriter, r *http.Request, m comp
 	ws = slices.DeleteFunc(ws, func(wk Worker) bool { return !wk.Serves(m.Subject, component.DriveOwn) })
 	q := r.URL.Query()
 	rows := make([]systemRow, 0, len(systems))
+	checking := false
 	for i, v := range systems {
 		c := list[i]
 		row := systemRow{SystemView: v, Kind: c.Connect.Kind, Highlight: q.Get("system") == v.Name, Workers: ws, Chosen: s.choice(ctx, m.Subject, m.Org, c.Name)}
+		if t, ok := s.lastCheck(ctx, m.Subject, m.Org, c.Name); ok && v.Connected {
+			row.Check = t.View(s.now())
+			checking = checking || t.Waiting(s.now())
+		}
 		switch {
 		case c.Connect.APIKey != nil:
 			row.Help, row.Signs, row.Extra = c.Connect.APIKey.Help, c.Connect.APIKey.Sign != nil, c.Connect.APIKey.Extra
@@ -228,7 +235,7 @@ func (s *Service) connectionsPage(w http.ResponseWriter, r *http.Request, m comp
 	render(w, http.StatusOK, "connections", map[string]any{
 		"Title": "Connections", "Member": m.Subject, "Admin": m.Admin, "Systems": rows, "Activity": acts, "Waiting": waiting, "Base": m.PageURL,
 		"Room": m.Room, "RoomOwner": m.RoomRole == component.RoomOwner, "InRoom": inRoom, "MyWorkers": ws,
-		"Msg": q.Get("msg"), "Err": q.Get("err") != "",
+		"Msg": q.Get("msg"), "Err": q.Get("err") != "", "Refresh": checking,
 	})
 }
 
@@ -269,7 +276,7 @@ func (s *Service) connectTo(ctx context.Context, m component.Member, name, reach
 		if err := s.saveGrant(ctx, m.Subject, m.Org, g); err != nil {
 			return connectResult{msg: "The connection could not be kept: " + err.Error(), err: true}
 		}
-		return connectResult{msg: c.DisplayName + " is connected." + s.answers(ctx, m.Org, asMember(m.Subject), c) + " Ask your agent again.", audit: &component.Audit{Action: "connect", Target: c.Name, Outcome: "allow", Detail: reach}}
+		return connectResult{msg: c.DisplayName + " is connected." + s.answers(ctx, m, asMember(m.Subject), c) + " Ask your agent again.", audit: &component.Audit{Action: "connect", Target: c.Name, Outcome: "allow", Detail: reach}}
 	}
 	switch c.Connect.Kind {
 	case connector.KindOAuth2:
@@ -435,6 +442,8 @@ type adminRow struct {
 	ReviewBlock       reviewBlock
 	Proposal          Proposal
 	Refused, Allowed  int
+	// Try is the last Try it, as the page shows it.
+	Try string
 }
 
 type draftRow struct {
@@ -603,6 +612,21 @@ func (s *Service) adminPage(w http.ResponseWriter, r *http.Request, m component.
 			back(w, m, "No such connector.", true)
 			return
 		}
+		if c.FromMember() {
+			// Sent from the admin's own computer: the answer comes back
+			// as the send's report (handleSendEgress).
+			switch err := s.tryFromComputer(ctx, m, c, tryAdmin); {
+			case err == nil:
+				back(w, m, c.DisplayName+": sent from your computer; the answer appears here in a few seconds.", false)
+			case errors.Is(err, component.ErrNoMemberComputer):
+				back(w, m, "Open your bnbloc desktop app, then try again: "+c.DisplayName+" is reached from members' computers.", true)
+			case errors.Is(err, errNoTry):
+				back(w, m, c.DisplayName+" names no test request: nothing to try.", true)
+			default:
+				back(w, m, "Connect your own account to "+c.DisplayName+" on Connections, then try it.", true)
+			}
+			return
+		}
 		t, err := s.tryConnection(ctx, m.Org, asMember(m.Subject), c)
 		switch {
 		case errors.Is(err, errNoTry):
@@ -692,6 +716,10 @@ func (s *Service) adminPage(w http.ResponseWriter, r *http.Request, m component.
 			}
 		}
 		row.ReviewBlock = reviewBlock{R: row.Review, Name: c.Name, Base: m.PageURL}
+		if t, ok := s.lastTry(ctx, m.Org, c.Name, reviewHash(c)); ok {
+			row.Try = t.View(s.now())
+			pending = pending || t.Waiting(s.now())
+		}
 		pending = pending || row.Review.Pending || row.Proposal.Pending
 		rows = append(rows, row)
 	}

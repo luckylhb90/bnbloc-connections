@@ -253,9 +253,20 @@ func (s *Service) fromMember(ctx context.Context, t component.Turn, p principal,
 		s.dropAuth(grantKey{p.key(), t.Org, c.Name})
 		force = true
 	}
-	auth, err := s.credentials(ctx, c, t.Org, p, g, force)
+	send, _, err := s.memberSend(ctx, c, t.Org, p, g, in, u, force)
 	if err != nil {
 		return s.failed(ctx, t, p, c, in, u, err)
+	}
+	return component.EgressResponse{Send: send}, nil
+}
+
+// memberSend is the Send that has the bridge send in from the member's
+// computer with p's credentials (force: fresh ones), signed here when the
+// connector signs, and the credentials it carries.
+func (s *Service) memberSend(ctx context.Context, c connector.Connector, org string, p principal, g *Grant, in component.EgressRequest, u *url.URL, force bool) (*component.EgressSend, cachedAuth, error) {
+	auth, err := s.credentials(ctx, c, org, p, g, force)
+	if err != nil {
+		return nil, cachedAuth{}, err
 	}
 	send := &component.EgressSend{Remove: c.CredentialHeaders(), Header: auth.header, Query: auth.query}
 	if a := c.Connect.APIKey; a != nil && a.Sign != nil {
@@ -279,7 +290,7 @@ func (s *Service) fromMember(ctx context.Context, t component.Turn, p principal,
 			send.Body = nil
 		}
 	}
-	return component.EgressResponse{Send: send}, nil
+	return send, auth, nil
 }
 
 // call makes the request as the member: every credential the agent sent is
