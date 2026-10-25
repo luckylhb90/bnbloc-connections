@@ -1,7 +1,7 @@
 {
   "kind": "bnbloc.assist.package/v1",
   "name": "connections-draft-connector",
-  "version": "1.4.0",
+  "version": "1.5.0",
   "displayName": "Draft a connector",
   "description": "Drafts a connections connector from an administrator's description of a system (and its pasted API documentation), for them to review and add.",
   "category": "authoring",
@@ -11,6 +11,9 @@
   ],
   "icon": "sparkle",
   "output": "json",
+  "context": [
+    "pages"
+  ],
   "fields": [
     {
       "name": "connector",

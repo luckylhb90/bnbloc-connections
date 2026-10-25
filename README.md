@@ -70,6 +70,7 @@ and reviews the drafts agents post there.
   },
   "expiredWhen": [{"status": 302, "locationContains": "/login"}],
   "cliEnv": {"ISSUES_TOKEN": "connected"},
+  "test": {"method": "GET", "path": "/api/myself"},
   "guide": "curl https://issues.example.com/api/issue/PROJ-1"
 }
 ```
@@ -132,6 +133,11 @@ and reviews the drafts agents post there.
 - `headers`: set on every request to the system whatever the agent sent
   (a mode its API takes in a header, such as `x-simulated-trading: 1`);
   never a credential, `Host` or a length.
+- `test`: one read that proves a connection works (`GET` or `HEAD` of a
+  path, with its query, on the first host; a read rule must take it). It
+  runs right after a member or a worker connects ("It answers", or what
+  the system said), and on the admin's **Try it**. Not for a connector
+  that sends from members' computers.
 - `answers`: requests answered here and never sent, `{method, path,
   status, contentType, body}` (status 200 and JSON by default): a CLI's
   own sign-in step (a token exchange) whose credential the component holds,
@@ -222,11 +228,21 @@ paste opens the Connections page.
 ## AI for the admin
 
 Configuring starts from words: **Connect a system** on the Connectors page
-takes a description (and any API documentation pasted) and the AI drafts
-the connector, which arrives as a draft with its review; the JSON stays
-the manual path. A review's finding comes with its **fix** (a JSON merge
-patch, never enabling, renaming or moving where requests go out), applied
-with one click and reviewed again.
+takes a description, any API documentation pasted, and up to three links
+to the documentation (the platform fetches them for the task), and the AI
+drafts the connector, which arrives as a draft with its review; the JSON
+stays the manual path. A review's finding comes with its **fix** (a JSON
+merge patch, never enabling, renaming or moving where requests go out),
+applied with one click and reviewed again.
+
+The AI checks its work (`docs/prd/2026-10-25-ai-checks-its-work.md` in
+bnbloc): a draft that does not parse strictly or validate, and a fix that
+would not make a valid connector, go back to the model with the error,
+up to three rounds (`component.ServiceClient.AssistChecked`); a draft
+still wrong after that says why. **Try it** sends the connector's `test`
+with the admin's own connection; a failure (status and the body's first
+characters, every credential value removed) is kept and the review runs
+again with it, so its fix answers what the system said.
 
 The component's own AI helps the admin decide; it never sits in a
 request's path and never reaches an agent
@@ -279,6 +295,7 @@ deprovisioning):
 | `orgs/<org>` | `connector:<name>` | the connector |
 | `orgs/<org>` | `secrets:<name>` | its client and provider secrets |
 | `orgs/<org>` | `draft:<name>` | an agent's draft |
+| `orgs/<org>` | `try:<name>` | the admin's last Try it (status, one line, no credential) |
 | `members/<subject>` | `grant:<org>:<name>` | the connection (refresh token, key or provider grant; the reach) |
 | `members/<subject>` | `held:<id>` | a held change (a day) |
 | `members/<subject>` | `activity:<org>` | the last 100 calls (method, path, status) |

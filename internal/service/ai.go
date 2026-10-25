@@ -69,14 +69,18 @@ func (s *Service) assist(ctx context.Context, task, org, member, text string) (m
 	if len([]rune(text)) > component.MaxServiceAssistText {
 		text = string([]rune(text)[:component.MaxServiceAssistText])
 	}
-	req := component.ServiceAssistRequest{Org: org, Member: member, Text: text}
-	fields, err := s.P.Assist(ctx, s.task(task), req)
-	if err != nil && !errors.Is(err, component.ErrAssistUnavailable) && ctx.Err() == nil {
-		// A model's reply that missed the task's shape now and then: once
-		// more before the run is a failure.
-		fields, err = s.P.Assist(ctx, s.task(task), req)
+	return s.P.Assist(ctx, s.task(task), component.ServiceAssistRequest{Org: org, Member: member, Text: text})
+}
+
+// assistChecked runs one of the component's tasks and checks its answer
+// with check (code, or reality), revising it with the problems found
+// (component.ServiceClient.AssistChecked, at most 3 rounds). It answers
+// the last fields and the problems still left (none: they passed).
+func (s *Service) assistChecked(ctx context.Context, task, org, member, text string, urls []string, check func(map[string]any) []string) (map[string]any, []string, error) {
+	if len([]rune(text)) > component.MaxServiceAssistText {
+		text = string([]rune(text)[:component.MaxServiceAssistText])
 	}
-	return fields, err
+	return s.P.AssistChecked(ctx, s.task(task), component.ServiceAssistRequest{Org: org, Member: member, Text: text, URLs: urls}, check, component.MaxAssistRounds)
 }
 
 // aiError is what a page says about a run that did not happen.
@@ -129,11 +133,13 @@ func itemsField(f map[string]any, name string, max int) []map[string]string {
 // Review is the AI's review of one connector as it was (Hash): what agents
 // can do with it, and what looks wrong.
 type Review struct {
-	Hash     string    `json:"hash"`
-	AtMs     int64     `json:"atMs"`
-	Pending  bool      `json:"pending,omitempty"`
-	Error    string    `json:"error,omitempty"`
-	Summary  string    `json:"summary,omitempty"`
+	Hash    string `json:"hash"`
+	AtMs    int64  `json:"atMs"`
+	Pending bool   `json:"pending,omitempty"`
+	Error   string `json:"error,omitempty"`
+	Summary string `json:"summary,omitempty"`
+	// Tried is the failed test the review was given (Try it).
+	Tried    string    `json:"tried,omitempty"`
 	Reads    []string  `json:"reads,omitempty"`
 	Changes  []string  `json:"changes,omitempty"`
 	Findings []Finding `json:"findings,omitempty"`
@@ -227,7 +233,26 @@ func (s *Service) runReview(org, member string, c connector.Connector, draft boo
 	defer cancel()
 	raw, _ := json.MarshalIndent(reviewed(c), "", "  ")
 	out := Review{Hash: hash, AtMs: s.now().UnixMilli()}
-	fields, err := s.assist(ctx, taskReview, org, member, "The connector an administrator is about to enable (JSON):\n"+string(raw))
+	text := "The connector an administrator is about to enable (JSON):\n" + string(raw)
+	if t, ok := s.lastTry(ctx, org, c.Name, hash); ok && !t.OK && !draft {
+		// Reality's word: what the system answered the connector's test.
+		text += "\n\nThe connector's test request was tried with the administrator's own connection and failed:\n" + t.Line
+		out.Tried = t.Line
+	}
+	// A fix is checked like any connector: one that does not make a valid
+	// connector goes back to the model with why.
+	check := func(f map[string]any) []string {
+		var problems []string
+		for i, it := range itemsField(f, "findings", 12) {
+			if fx := strings.TrimSpace(it["fix"]); fx != "" {
+				if _, err := fixed(c, fx); err != nil {
+					problems = append(problems, fmt.Sprintf("finding %d (%s): its fix does not make a valid connector: %v", i+1, clip(it["about"], 60), err))
+				}
+			}
+		}
+		return problems
+	}
+	fields, _, err := s.assistChecked(ctx, taskReview, org, member, text, nil, check)
 	if err != nil {
 		slog.Warn("connections: review failed", "connector", c.Name, "error", err)
 		out.Error = aiError(err)

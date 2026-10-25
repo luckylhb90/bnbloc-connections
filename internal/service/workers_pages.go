@@ -176,7 +176,7 @@ func (s *Service) connectWorker(w http.ResponseWriter, ctx context.Context, m co
 			return
 		}
 		audit(w, component.Audit{Action: "worker-connect", Target: p.Worker.ID + " " + c.Name, Outcome: "allow"})
-		back(w, m, p.Worker.DisplayName+" reaches "+c.DisplayName+" now (reading only, until you allow changes).", false)
+		back(w, m, p.Worker.DisplayName+" reaches "+c.DisplayName+" now (reading only, until you allow changes)."+s.answers(ctx, m.Org, p, c), false)
 	case a.Status == provider.Pending:
 		back(w, m, firstNonEmpty(a.Message, "Confirm the request that was sent, then connect again."), false)
 	default:

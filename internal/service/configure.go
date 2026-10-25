@@ -23,24 +23,27 @@ const taskDraft = "draft-connector"
 
 // draftFromDescription asks the AI for a connector from the admin's words
 // (and anything pasted: an API's documentation), kept as a draft.
-func (s *Service) draftFromDescription(ctx context.Context, m component.Member, description string) (Draft, error) {
+func (s *Service) draftFromDescription(ctx context.Context, m component.Member, description string, urls []string) (Draft, error) {
 	description = strings.TrimSpace(description)
 	if description == "" {
 		return Draft{}, errors.New("describe the system first")
 	}
-	fields, err := s.assist(ctx, taskDraft, m.Org, m.Subject, "What the administrator wants to connect, in their words (and anything they pasted):\n"+description)
+	// The draft is checked as a connector (strictly read, then validated);
+	// one that fails goes back to the model with why, until it passes.
+	var c connector.Connector
+	check := func(f map[string]any) []string {
+		var err error
+		if c, err = draftConnector(f); err != nil {
+			return []string{err.Error()}
+		}
+		return nil
+	}
+	fields, problems, err := s.assistChecked(ctx, taskDraft, m.Org, m.Subject, "What the administrator wants to connect, in their words (and anything they pasted):\n"+description, urls, check)
 	if err != nil {
 		return Draft{}, errors.New(aiError(err))
 	}
-	raw := strings.TrimSpace(textField(fields, "connector", 16<<10))
-	raw = strings.TrimSuffix(strings.TrimPrefix(strings.TrimPrefix(raw, "```json"), "```"), "```")
-	c, err := parseDraft([]byte(raw))
-	if err != nil {
-		return Draft{}, errors.New("the AI's draft is not a connector's JSON: " + err.Error())
-	}
-	c.Enabled = false
-	if err := c.Validate(); err != nil {
-		return Draft{}, errors.New("the AI's draft is not a valid connector (" + err.Error() + "): describe it again, or paste the JSON")
+	if len(problems) > 0 {
+		return Draft{}, errors.New("the AI's draft is still not a valid connector (" + problems[0] + "): describe it again, or paste the JSON")
 	}
 	d := Draft{Connector: c, DraftedBy: m.Subject + " (described, drafted by AI)", CreatedAtMs: s.now().UnixMilli()}
 	if notes := textField(fields, "notes", 600); notes != "" {
@@ -51,6 +54,22 @@ func (s *Service) draftFromDescription(ctx context.Context, m component.Member, 
 	}
 	s.ensureReview(ctx, m.Org, m.Subject, c, true, true)
 	return d, nil
+}
+
+// draftConnector is the connector an AI's draft fields hold, checked: read
+// strictly (parseDraft), disabled, valid.
+func draftConnector(fields map[string]any) (connector.Connector, error) {
+	raw := strings.TrimSpace(textField(fields, "connector", 16<<10))
+	raw = strings.TrimSuffix(strings.TrimPrefix(strings.TrimPrefix(raw, "```json"), "```"), "```")
+	c, err := parseDraft([]byte(raw))
+	if err != nil {
+		return c, errors.New("connector: not a connector's JSON: " + err.Error())
+	}
+	c.Enabled = false
+	if err := c.Validate(); err != nil {
+		return c, errors.New("connector: " + err.Error())
+	}
+	return c, nil
 }
 
 // fixed is c with a review's fix (a JSON merge patch) applied, valid; a fix
@@ -126,7 +145,7 @@ type drafting struct {
 const draftingPrefix = "drafting:"
 
 // startDrafting keeps a drafting under way and runs it off the request.
-func (s *Service) startDrafting(ctx context.Context, m component.Member, description string) error {
+func (s *Service) startDrafting(ctx context.Context, m component.Member, description string, urls []string) error {
 	description = strings.TrimSpace(description)
 	if description == "" {
 		return errors.New("describe the system first")
@@ -138,7 +157,7 @@ func (s *Service) startDrafting(ctx context.Context, m component.Member, descrip
 	s.later(func() {
 		ctx, cancel := aiContext()
 		defer cancel()
-		if _, err := s.draftFromDescription(ctx, m, description); err != nil {
+		if _, err := s.draftFromDescription(ctx, m, description, urls); err != nil {
 			d.Error = err.Error()
 			_ = s.P.PutJSON(ctx, platform.Org(m.Org), draftingPrefix+d.ID, d)
 			return

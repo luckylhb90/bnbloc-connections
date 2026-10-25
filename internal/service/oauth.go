@@ -349,7 +349,7 @@ func (s *Service) handleOAuthCallback(w http.ResponseWriter, r *http.Request) {
 		s.callbackPage(w, http.StatusOK, c.DisplayName+" can take changes now", "Open the change from its card in the room again and allow it.")
 		return
 	}
-	s.callbackPage(w, http.StatusOK, c.DisplayName+" is connected", "You can close this tab. Your own agents now reach "+c.DisplayName+" as you"+reachWords(st.Reach)+".")
+	s.callbackPage(w, http.StatusOK, c.DisplayName+" is connected", "You can close this tab. Your own agents now reach "+c.DisplayName+" as you"+reachWords(st.Reach)+"."+s.answers(ctx, st.Org, asMember(st.Member), c))
 }
 
 func reachWords(reach string) string {

@@ -39,6 +39,10 @@ type Connector struct {
 	Policy      Policy            `json:"policy"`
 	ExpiredWhen []Expired         `json:"expiredWhen,omitempty"`
 	CLIEnv      map[string]string `json:"cliEnv,omitempty"`
+	// Test is a read that proves a connection works (the balance, the
+	// signed-in user): tried after a member connects and on the admin's
+	// Try it.
+	Test *Test `json:"test,omitempty"`
 	// Headers are set on every request to the system, whatever the agent
 	// sent (a mode the system's API takes in a header, such as its
 	// simulated trading).
@@ -153,6 +157,13 @@ type Sign struct {
 	Payload         string   `json:"payload,omitempty"`
 	Encoding        string   `json:"encoding,omitempty"`
 	Paths           []string `json:"paths,omitempty"`
+}
+
+// Test is a connector's test request: GET (default) or HEAD of a path
+// (with its query) on its first host, one its read rules take.
+type Test struct {
+	Method string `json:"method,omitempty"`
+	Path   string `json:"path"`
 }
 
 // Extra is one more value a member pastes with their key (a passphrase),
@@ -310,6 +321,16 @@ func (c Connector) Validate() error {
 	}
 	if len(c.Guide) > MaxGuide {
 		return fmt.Errorf("guide: at most %d bytes", MaxGuide)
+	}
+	if t := c.Test; t != nil {
+		m := t.Method
+		if m == "" {
+			m = "GET"
+		}
+		path, _, _ := strings.Cut(t.Path, "?")
+		if (m != "GET" && m != "HEAD") || !strings.HasPrefix(t.Path, "/") || c.Classify(m, path, nil) != Read {
+			return errors.New("test: a GET or HEAD of a path the read rules take")
+		}
 	}
 	for k, v := range c.Headers {
 		if !headerName(k) || reservedHeader(k) || strings.ContainsAny(v, "\r\n") || len(v) > 256 {

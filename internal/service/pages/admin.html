@@ -1,5 +1,6 @@
 {{define "review"}}{{$b := .}}{{with .R}}<div class="ai"><div class="muted">AI review{{if .Pending}}: reviewing…{{end}}</div>
 {{if .Error}}<div class="muted">{{.Error}}</div>{{end}}
+{{if .Tried}}<div class="muted">Tried with your connection: {{.Tried}}</div>{{end}}
 {{if .Summary}}<div>{{.Summary}}</div>{{end}}
 {{if .Reads}}<div class="muted">Reads without asking:</div><ul>{{range .Reads}}<li>{{.}}</li>{{end}}</ul>{{end}}
 {{if .Changes}}<div class="muted">Changes, after the member allows them:</div><ul>{{range .Changes}}<li>{{.}}</li>{{end}}</ul>{{end}}
@@ -12,6 +13,8 @@
 <div class="card"><strong>Connect a system</strong>
 <form class="block" method="post" action="{{.Base}}describe"><label for="describe">Say what to connect and what agents may do there, in your words; paste its API documentation if you have it. AI drafts the connector; you review and add it.</label>
 <textarea id="describe" name="description" style="min-height:90px;font-family:inherit" placeholder="Our issue tracker at issues.example.com: agents read issues and comments; filing or editing an issue asks first. People connect with a personal token from Profile → Tokens."></textarea>
+<label for="links">Its API documentation (optional): up to 3 https links; AI reads them</label>
+<input id="links" name="links" placeholder="https://docs.example.com/api/authentication">
 <p><button class="primary" data-busy="Drafting…">Draft it</button></p></form></div>
 {{range .Drafting}}<div class="card">{{if .Error}}<strong>No draft</strong> <span class="muted">for “{{.Description}}”</span><div class="muted">{{.Error}}</div>
 <form method="post" action="{{$.Base}}dismissdrafting"><input type="hidden" name="id" value="{{.ID}}"><button>Dismiss</button></form>{{else}}<div class="row"><div><span class="spin" aria-hidden="true"></span> <strong>AI is drafting</strong> <span class="muted">“{{.Description}}”</span><div class="muted">This page updates by itself; the draft appears below with its review.</div></div></div>{{end}}</div>{{end}}
@@ -37,6 +40,7 @@
 <form method="post" action="{{$.Base}}delete"><input type="hidden" name="name" value="{{.C.Name}}"><button class="danger">Remove</button></form></div></div>
 {{template "review" .ReviewBlock}}
 <form method="post" action="{{$.Base}}review"><input type="hidden" name="name" value="{{.C.Name}}"><button>Review again</button></form>
+{{if and .C.Test .C.Enabled (not .C.FromMember)}}<form method="post" action="{{$.Base}}try"><input type="hidden" name="name" value="{{.C.Name}}"><button data-busy="Trying…">Try it</button> <span class="muted">sends {{or .C.Test.Method "GET"}} {{.C.Test.Path}} with your own connection</span></form>{{end}}
 {{if or .Refused .Allowed .Proposal.Rules .Proposal.Pending .Proposal.Error}}<div class="ai"><div class="muted">From use: {{.Refused}} refused request{{if ne .Refused 1}}s{{end}} no rule classifies, {{.Allowed}} allowed change{{if ne .Allowed 1}}s{{end}}{{if .Proposal.Pending}} · suggesting rules…{{end}}</div>
 {{if .Proposal.Error}}<div class="muted">{{.Proposal.Error}}</div>{{end}}
 {{if .Proposal.Notes}}<div>{{.Proposal.Notes}}</div>{{end}}

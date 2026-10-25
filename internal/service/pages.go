@@ -4,6 +4,7 @@ import (
 	"context"
 	"embed"
 	"encoding/json"
+	"errors"
 	"html/template"
 	"log/slog"
 	"net/http"
@@ -268,7 +269,7 @@ func (s *Service) connectTo(ctx context.Context, m component.Member, name, reach
 		if err := s.saveGrant(ctx, m.Subject, m.Org, g); err != nil {
 			return connectResult{msg: "The connection could not be kept: " + err.Error(), err: true}
 		}
-		return connectResult{msg: c.DisplayName + " is connected. Ask your agent again.", audit: &component.Audit{Action: "connect", Target: c.Name, Outcome: "allow", Detail: reach}}
+		return connectResult{msg: c.DisplayName + " is connected." + s.answers(ctx, m.Org, asMember(m.Subject), c) + " Ask your agent again.", audit: &component.Audit{Action: "connect", Target: c.Name, Outcome: "allow", Detail: reach}}
 	}
 	switch c.Connect.Kind {
 	case connector.KindOAuth2:
@@ -594,6 +595,32 @@ func (s *Service) adminPage(w http.ResponseWriter, r *http.Request, m component.
 		s.ensureReview(ctx, m.Org, m.Subject, c, draft, true)
 		back(w, m, "Reviewing "+c.DisplayName+"…", false)
 		return
+	case "try":
+		// The admin's own connection runs the connector's test; a failure
+		// is the review's evidence, and the review proposes the fix.
+		var c connector.Connector
+		if found, err := s.P.GetJSON(ctx, org, connectorPrefix+form.Get("name"), &c); err != nil || !found {
+			back(w, m, "No such connector.", true)
+			return
+		}
+		t, err := s.tryConnection(ctx, m.Org, asMember(m.Subject), c)
+		switch {
+		case errors.Is(err, errNoTry):
+			back(w, m, c.DisplayName+" names no test request, or its requests go out from members' computers: nothing to try here.", true)
+			return
+		case err != nil:
+			back(w, m, "Connect your own account to "+c.DisplayName+" on Connections, then try it.", true)
+			return
+		}
+		s.keepTry(ctx, m.Org, c.Name, t)
+		audit(w, component.Audit{Action: "connector-try", Target: c.Name, Outcome: map[bool]string{true: "ok", false: "failed"}[t.OK], Detail: t.Line})
+		if t.OK {
+			back(w, m, c.DisplayName+": "+t.Line+". It works.", false)
+			return
+		}
+		s.ensureReview(ctx, m.Org, m.Subject, c, false, true)
+		back(w, m, c.DisplayName+": "+t.Line+". AI is reviewing the connector with this answer, for a fix.", true)
+		return
 	case "propose":
 		name := form.Get("name")
 		var c connector.Connector
@@ -617,7 +644,7 @@ func (s *Service) adminPage(w http.ResponseWriter, r *http.Request, m component.
 		// Drafting takes the model's time: it runs off the request, and the
 		// page shows it under way until the draft (or why there is none)
 		// is there.
-		if err := s.startDrafting(ctx, m, form.Get("description")); err != nil {
+		if err := s.startDrafting(ctx, m, form.Get("description"), docLinks(form.Get("links"))); err != nil {
 			back(w, m, "No draft: "+err.Error(), true)
 			return
 		}
