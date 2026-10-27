@@ -47,7 +47,9 @@
     {{else if eq .Kind "apiKey"}}
     {{else if .Waiting}}
       {{if .Open}}<a href="{{.Open}}" target="_blank" rel="noopener"><button class="primary">Open the authorization page</button></a>{{end}}
-      <form method="post" action="{{$.Base}}connect"><input type="hidden" name="system" value="{{.Name}}"><input type="hidden" name="reach" value="read"><input type="hidden" name="notify" value="1"><button>Send it again</button></form>
+      <form method="post" action="{{$.Base}}connect"><input type="hidden" name="system" value="{{.Name}}"><input type="hidden" name="reach" value="read"><input type="hidden" name="notify" value="1"><button>{{if .Open}}Send it to me in chat instead{{else}}Send it again{{end}}</button></form>
+    {{else if eq .Kind "provider"}}
+      <form method="post" action="{{$.Base}}connect" target="_blank" data-wait="{{.Name}}"><input type="hidden" name="system" value="{{.Name}}"><input type="hidden" name="reach" value="read"><button class="primary">Connect</button></form>
     {{else}}
       <form method="post" action="{{$.Base}}connect"><input type="hidden" name="system" value="{{.Name}}"><input type="hidden" name="reach" value="read"><button class="primary">Connect</button></form>
     {{end}}

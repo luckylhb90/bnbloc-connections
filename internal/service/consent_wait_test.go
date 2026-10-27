@@ -21,7 +21,7 @@ import (
 // A consent given in the browser: Connect opens the provider's consent page
 // (no chat card), the page waits and asks the provider only to check, and
 // the connection completes on its own once the consent arrived, on the page
-// or at the agent's next request; "Send it again" asks the provider
+// or at the agent's next request; "Send it to me in chat instead" asks the provider
 // to prompt through its own channel.
 func TestConsentInTheBrowser(t *testing.T) {
 	fx := newFixture(t)
@@ -59,7 +59,7 @@ func TestConsentInTheBrowser(t *testing.T) {
 		t.Fatalf("connect = %d %s (notify %v), want the consent page", rec.Code, rec.Header().Get("Location"), last().Notify)
 	}
 	body := fx.page(false, http.MethodGet, "/pages/connections", nil).Body.String()
-	if !strings.Contains(body, "waiting for your authorization") || !strings.Contains(body, `<meta name="live" content="issues:consent">`) || !strings.Contains(body, "Send it again") {
+	if !strings.Contains(body, "waiting for your authorization") || !strings.Contains(body, `<meta name="live" content="issues:consent">`) || !strings.Contains(body, "Send it to me in chat instead") {
 		t.Fatalf("the waiting row:\n%s", body)
 	}
 	if c := last(); !c.Check || grant() != nil {
