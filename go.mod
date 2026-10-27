@@ -1,12 +1,12 @@
 module github.com/luckylhb90/bnbloc-connections
 
-go 1.24.0
+go 1.26.0
 
 require (
 	github.com/aws/aws-sdk-go-v2 v1.47.1
 	github.com/aws/aws-sdk-go-v2/config v1.33.6
 	github.com/aws/aws-sdk-go-v2/service/secretsmanager v1.39.6
-	github.com/luckylhb90/bnbloc v0.1.1-0.20261025061321-8a11e8f606ce
+	github.com/luckylhb90/bnbloc v0.1.1-0.20261027052932-c4d356ea9dd5
 )
 
 require (

@@ -23,7 +23,9 @@ import (
 // or platform agent, the connectors a digital worker serves it at; with
 // the connectors' CLI placeholders.
 func (s *Service) handleHosts(w http.ResponseWriter, r *http.Request, t component.Turn, _ []byte) {
-	out := component.EgressHosts{Hosts: []string{}, Env: map[string]string{}}
+	// Streams: a streamed request is decided here on its method and path
+	// (streamedRefusal).
+	out := component.EgressHosts{Hosts: []string{}, Env: map[string]string{}, Streams: true}
 	if t.Drive != component.DriveOwn {
 		systems, err := s.systemsFor(r.Context(), t)
 		if err != nil {
@@ -145,6 +147,13 @@ func (s *Service) serve(ctx context.Context, t component.Turn, in component.Egre
 		return component.EgressResponse{Status: ans.Status, Header: map[string][]string{"Content-Type": {ans.ContentType}}, Body: []byte(ans.Body)},
 			&component.Audit{Action: "request", Target: c.Name + " " + target, Outcome: "allow", Detail: "answered here" + as}
 	}
+	if in.Streamed {
+		if why := streamedRefusal(c, in.Method, u.Path); why != "" {
+			s.record(ctx, t, p, c, in.Method, u.Path, 0, "refused")
+			return refusal(http.StatusRequestEntityTooLarge, why, nil, nil),
+				&component.Audit{Action: "request", Target: c.Name + " " + target, Outcome: "deny", Detail: "streamed body"}
+		}
+	}
 	class := c.Classify(in.Method, u.Path, in.Body)
 	switch {
 	case class == "":
@@ -171,6 +180,25 @@ func (s *Service) serve(ctx context.Context, t component.Turn, in component.Egre
 	}
 	s.record(ctx, t, p, c, in.Method, u.Path, resp.Status, class)
 	return resp, &component.Audit{Action: "request", Target: c.Name + " " + target, Outcome: "allow", Detail: class + fmt.Sprintf(" %d", resp.Status) + as}
+}
+
+// streamedRefusal is why a streamed request (its body larger than an
+// envelope and not here; docs/prd/2026-10-27-streamed-member-sends.md in
+// bnbloc) cannot be served, or "": it can only go out from the member's
+// computer, and only where neither the policy nor a signature needs its body.
+func streamedRefusal(c connector.Connector, method, path string) string {
+	const large = "the request body is larger than 8 MiB"
+	switch {
+	case !c.FromMember():
+		// decision: docs/prd/2026-10-27-streamed-member-sends.md (1), never
+		// sent from the member's computer instead of the server.
+		return large + ", too large to go through the service: an administrator can switch the " + c.DisplayName + " connector to send from members' computers"
+	case c.Connect.APIKey != nil && c.Connect.APIKey.Sign != nil:
+		return large + ", and the " + c.DisplayName + " connector signs request bodies"
+	case c.Policy.ReadsBody(method, path):
+		return large + ", and whether " + method + " " + path + " is a read depends on its body, which is not read at that size"
+	}
+	return ""
 }
 
 // asDetail is an audit row's note of a worker ("" for the member).
@@ -247,6 +275,9 @@ func (s *Service) fromMember(ctx context.Context, t component.Turn, p principal,
 			s.record(ctx, t, p, c, in.Method, u.Path, r.Status, class)
 			return component.EgressResponse{Accept: true}, &component.Audit{Action: "request", Target: c.Name + " " + target, Outcome: "allow", Detail: class + fmt.Sprintf(" %d from the member's computer", r.Status) + asDetail(p)}
 		}
+		if in.Streamed {
+			return s.streamedRefused(ctx, t, p, c, g, in, u)
+		}
 		if r.Attempt >= component.MaxEgressSends {
 			return s.failed(ctx, t, p, c, in, u, errReconnect)
 		}
@@ -258,6 +289,36 @@ func (s *Service) fromMember(ctx context.Context, t component.Turn, p principal,
 		return s.failed(ctx, t, p, c, in, u, err)
 	}
 	return component.EgressResponse{Send: send}, nil
+}
+
+// streamedRefused answers a refused sign-in for a streamed request, which
+// is never sent a second time (decision: docs/prd/2026-10-27-streamed-member-sends.md
+// (3), its body is not kept): the cached credentials are dropped; renewed,
+// the agent is told to run it again; not renewable or dead, the member
+// connects again.
+func (s *Service) streamedRefused(ctx context.Context, t component.Turn, p principal, c connector.Connector, g *Grant, in component.EgressRequest, u *url.URL) (component.EgressResponse, *component.Audit) {
+	s.dropAuth(grantKey{p.key(), t.Org, c.Name})
+	if !renewable(c) {
+		return s.failed(ctx, t, p, c, in, u, errReconnect)
+	}
+	if _, err := s.credentials(ctx, c, t.Org, p, g, true); err != nil {
+		return s.failed(ctx, t, p, c, in, u, err)
+	}
+	s.record(ctx, t, p, c, in.Method, u.Path, http.StatusUnauthorized, "renewed")
+	return refusal(http.StatusUnauthorized, "the sign-in to "+c.DisplayName+" had ended and is renewed now; this request was sent once and its body is not kept: run it again", nil, nil),
+		&component.Audit{Action: "request", Target: c.Name + " " + in.Method + " " + u.Path, Outcome: "failed", Detail: "sign-in renewed, streamed body not sent again" + asDetail(p)}
+}
+
+// renewable reports whether c's credentials can be made fresh without the
+// member: a refresh, a provider's authorization, a key's exchange.
+func renewable(c connector.Connector) bool {
+	switch c.Connect.Kind {
+	case connector.KindOAuth2, connector.KindProvider:
+		return true
+	case connector.KindAPIKey:
+		return c.Connect.APIKey.Exchange != nil
+	}
+	return false
 }
 
 // memberSend is the Send that has the bridge send in from the member's

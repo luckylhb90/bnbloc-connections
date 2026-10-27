@@ -579,21 +579,7 @@ func (c Connector) Classify(method, path string, body []byte) string {
 
 func (Policy) matches(rules []Rule, defaults []string, method, path string, body []byte) bool {
 	for _, r := range rules {
-		ms := r.Methods
-		if len(ms) == 0 {
-			ms = defaults
-		}
-		if !slices.Contains(ms, method) {
-			continue
-		}
-		hit := false
-		for _, p := range r.Paths {
-			if Glob(p, path) {
-				hit = true
-				break
-			}
-		}
-		if !hit {
+		if !r.takes(defaults, method, path) {
 			continue
 		}
 		if r.Body != "" {
@@ -605,6 +591,33 @@ func (Policy) matches(rules []Rule, defaults []string, method, path string, body
 		return true
 	}
 	return false
+}
+
+// ReadsBody reports whether a rule that looks at the body could take a
+// request of this method and path: such a request cannot be classified
+// without its body (a streamed one, whose body is not at hand).
+func (p Policy) ReadsBody(method, path string) bool {
+	for _, set := range []struct {
+		rules    []Rule
+		defaults []string
+	}{{p.Read, readMethods}, {p.Write, methods}} {
+		for _, r := range set.rules {
+			if r.Body != "" && r.takes(set.defaults, method, path) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// takes reports whether the rule's methods (defaults when it names none)
+// and paths take the request, its body aside.
+func (r Rule) takes(defaults []string, method, path string) bool {
+	ms := r.Methods
+	if len(ms) == 0 {
+		ms = defaults
+	}
+	return slices.Contains(ms, method) && slices.ContainsFunc(r.Paths, func(p string) bool { return Glob(p, path) })
 }
 
 // ErrAmbiguousPath is a path a server may read otherwise than the policy.

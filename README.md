@@ -127,7 +127,15 @@ and reviews the drafts agents post there.
   bridge the member's credentials for that one request (never the agent),
   the bridge sends it and reports the answer, which is recorded and audited
   the same way; an allowed change goes through at the agent's next send of
-  it. The admin page switches it per connector.
+  it. The admin page switches it per connector. Sent from the member's
+  computer, answers stream at any size, and a request body larger than
+  8 MiB (a `git push`) streams too: the component decides it on its method
+  and path without seeing the body, refusing it (413) where a body rule
+  could take it or the connector signs bodies; it is sent once, never
+  again after a refused sign-in (renewed: run it again), and a held one,
+  once allowed, lets the same method and URL through once (bnbloc's
+  `docs/prd/2026-10-27-streamed-member-sends.md`). A connector that sends
+  from the server refuses such a body: switch it to members' computers.
 - `cliEnv`: placeholders a CLI needs before it runs (every credential sent
   to a connector host is replaced).
 - `headers`: set on every request to the system whatever the agent sent

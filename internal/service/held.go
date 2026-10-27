@@ -43,7 +43,9 @@ func (s *Service) hold(ctx context.Context, t component.Turn, p principal, c con
 const allowanceTTL = time.Hour
 
 // allowanceKey names one allowed change: the same request again (method,
-// URL, body), in the same organization, system and room.
+// URL, body), in the same organization, system and room. A streamed
+// request has no body here, so its key is its method and URL.
+// decision: docs/prd/2026-10-27-streamed-member-sends.md (2) in bnbloc.
 func allowanceKey(org, connectorName, room string, in component.EgressRequest) string {
 	h := sha256.New()
 	for _, part := range []string{org, connectorName, room, in.Method, in.URL} {

@@ -111,6 +111,12 @@ func (s *Service) decide(ctx context.Context, m component.Member, hc heldChange,
 		return decision{heading: "Allowed", text: "Ask your agent again: its next try of this change goes through, from your computer (within an hour).",
 			audit: &component.Audit{Action: "change", Target: target, Outcome: "allow", Detail: "sent from the member's computer" + asDetail(p)}}
 	}
+	if h.Request.Streamed {
+		// Held while the connector sent from members' computers: its body
+		// was never here, so the service cannot make it.
+		return decision{heading: "Not made", text: c.DisplayName + " now sends from the server, and this change's body (larger than 8 MiB) can only go from your computer: ask your agent again after an administrator switches it back.",
+			audit: &component.Audit{Action: "change", Target: target, Outcome: "failed", Detail: "streamed body, server send"}}
+	}
 	resp, err := s.call(ctx, c, m.Org, p, &g, h.Request, u)
 	if err != nil {
 		s.record(ctx, t, p, c, h.Request.Method, u.Path, 0, "failed")
