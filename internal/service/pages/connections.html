@@ -46,10 +46,10 @@
       <form method="post" action="{{$.Base}}disconnect"><input type="hidden" name="system" value="{{.Name}}"><button class="danger">Disconnect</button></form>
     {{else if eq .Kind "apiKey"}}
     {{else if .Waiting}}
-      {{if .Open}}<a href="{{.Open}}"{{if .OpenInTab}} target="_blank" rel="noopener"{{end}}><button class="primary">Open the authorization again</button></a>{{end}}
+      {{if .Open}}<a href="{{.Open}}" data-open-in="{{.OpenIn}}"><button class="primary">Open the authorization again</button></a>{{end}}
       <form method="post" action="{{$.Base}}connect"><input type="hidden" name="system" value="{{.Name}}"><input type="hidden" name="reach" value="read"><input type="hidden" name="notify" value="1"><button>Send it to me in chat again</button></form>
     {{else if eq .Kind "provider"}}
-      <form method="post" action="{{$.Base}}connect" data-wait="{{.Name}}"><input type="hidden" name="system" value="{{.Name}}"><input type="hidden" name="reach" value="read"><button class="primary">Connect</button></form>
+      <form method="post" action="{{$.Base}}connect" data-open-in="{{.OpenIn}}"><input type="hidden" name="system" value="{{.Name}}"><input type="hidden" name="reach" value="read"><input type="hidden" name="notify" value=""><button class="primary">Connect</button></form>
     {{else}}
       <form method="post" action="{{$.Base}}connect"><input type="hidden" name="system" value="{{.Name}}"><input type="hidden" name="reach" value="read"><button class="primary">Connect</button></form>
     {{end}}

@@ -113,9 +113,12 @@ type systemRow struct {
 	// Waiting: the connection waits for the member's consent at Open
 	// (consent_wait.go), followed until it arrives; OpenInTab: Open is a
 	// page (a new tab), not an app link (which leaves this page in place).
-	Waiting   bool
-	Open      string
-	OpenInTab bool
+	Waiting bool
+	Open    string
+	// OpenIn: the browsers a provider's consent page works in
+	// (connector.Provider.OpenIn); elsewhere Connect asks for the
+	// provider's own prompt.
+	OpenIn string
 }
 
 // optionRow is one member option of a connection, on or off.
@@ -220,10 +223,9 @@ func (s *Service) connectionsPage(w http.ResponseWriter, r *http.Request, m comp
 		case c.Connect.APIKey != nil:
 			row.Help, row.Signs, row.Extra = c.Connect.APIKey.Help, c.Connect.APIKey.Sign != nil, c.Connect.APIKey.Extra
 		case c.Connect.Provider != nil:
-			row.Help = c.Connect.Provider.Help
+			row.Help, row.OpenIn = c.Connect.Provider.Help, c.Connect.Provider.OpenIn
 			if wt, ok := s.consentWaitFor(ctx, m.Subject, m.Org, c.Name); ok && !v.Connected {
-				_, app := openable(wt.Open)
-				row.Waiting, row.Open, row.OpenInTab = true, wt.Open, wt.Open != "" && !app
+				row.Waiting, row.Open = true, wt.Open
 				live = append(live, c.Name+":consent")
 			}
 			if v.Connected {

@@ -235,6 +235,12 @@ type Provider struct {
 	// off), passed on every call as the member set them
 	// (provider.Call.Options).
 	Options []ProviderOption `json:"options,omitempty"`
+	// OpenIn is a regular expression of the user agent of the browser the
+	// provider's consent page works in (a chat app's own browser): there,
+	// Connect opens the page in place; anywhere else it asks the provider
+	// to prompt the member its own way (provider.Call.Notify). Empty: the
+	// page works in any browser.
+	OpenIn string `json:"openIn,omitempty"`
 }
 
 // ProviderOption is one choice a member makes on their connection to a
@@ -488,6 +494,9 @@ func (c Connect) validate() error {
 		u, err := url.Parse(p.URL)
 		if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
 			return errors.New("provider.url: an http(s) URL")
+		}
+		if _, err := regexp.Compile(p.OpenIn); err != nil || len(p.OpenIn) > 200 {
+			return errors.New("provider.openIn: a regular expression of at most 200 characters")
 		}
 		if len(p.Options) > MaxProviderOptions {
 			return fmt.Errorf("provider.options: at most %d", MaxProviderOptions)

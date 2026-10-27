@@ -119,3 +119,21 @@ func TestOpenable(t *testing.T) {
 		}
 	}
 }
+
+// A provider connector names the browsers its consent page works in
+// (provider.openIn): the Connect form carries it for the page's script, and
+// a pattern that is not a regular expression is refused.
+func TestProviderOpenIn(t *testing.T) {
+	fx := newFixture(t)
+	c := issues()
+	c.Connect = connector.Connect{Kind: connector.KindProvider, Provider: &connector.Provider{URL: "https://provider.example.com/conn", App: "app-1", OpenIn: `ChatApp/\d`}}
+	fx.addConnector(c)
+	body := fx.page(false, http.MethodGet, "/pages/connections", nil).Body.String()
+	if !strings.Contains(body, `data-open-in="ChatApp/\d"`) || !strings.Contains(body, `name="notify" value=""`) {
+		t.Fatalf("the Connect form:\n%s", body)
+	}
+	c.Connect.Provider.OpenIn = "("
+	if err := c.Validate(); err == nil {
+		t.Fatal("a broken openIn pattern is valid")
+	}
+}
