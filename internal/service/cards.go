@@ -44,7 +44,7 @@ func (s *Service) handleCard(w http.ResponseWriter, r *http.Request, m component
 		}
 		writeJSON(w, http.StatusOK, component.CardReply{Text: text, Open: d.open, Done: d.open == ""})
 	case "connect":
-		res := s.connectTo(ctx, m, q.Get("system"), connector.Read, "", nil)
+		res := s.connectTo(ctx, m, q.Get("system"), connector.Read, "", nil, false)
 		if res.audit != nil {
 			audit(w, *res.audit)
 		}

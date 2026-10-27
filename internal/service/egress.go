@@ -123,6 +123,11 @@ func (s *Service) serve(ctx context.Context, t component.Turn, in component.Egre
 			&component.Audit{Action: "request", Target: c.Name + " " + target, Outcome: "deny", Detail: "rate"}
 	}
 	act, err := s.actingAs(ctx, t, c)
+	if err == nil && !act.ok && t.Drive == component.DriveOwn && s.settleWait(ctx, t.Requester, t.Org, c) {
+		// The person consented in their browser and never came back to the
+		// page: the request completes the connection.
+		act, err = s.actingAs(ctx, t, c)
+	}
 	if err != nil {
 		return refusal(http.StatusBadGateway, "the connections component cannot read your connection right now", nil, nil), nil
 	}

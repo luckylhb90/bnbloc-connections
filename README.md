@@ -300,6 +300,15 @@ answers `/authorize` with the headers and cookies one request carries until
 a time. `pending` means the member must do something outside bnbloc
 first; `admin` marks a refusal an administrator fixes.
 
+A `pending` connect may name the page to do it on (`open`, https: a consent
+page). Connect then opens it in a new tab and the member's Connections page
+waits (refreshing, up to 15 minutes): it asks the provider with `check`
+(report only, never prompt) and connects once the provider answers
+`connected`, as does the member's agent's next request to that system, so
+nobody presses Connect twice. "Send it to me in chat instead" (a waiting row's
+button) connects with `notify`: the provider prompts through its own channel
+(a chat card) as well.
+
 ## What is kept, where
 
 Everything in bnbloc's sealed store (the service's values, sealed with the

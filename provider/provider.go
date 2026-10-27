@@ -51,6 +51,12 @@ type Call struct {
 	Grant     string     `json:"grant,omitempty"`
 	// Force: authorize again (the system refused what was given).
 	Force bool `json:"force,omitempty"`
+	// Check (connect): only report where the connection stands, never
+	// prompt the member (a page waiting for their consent asks again).
+	Check bool `json:"check,omitempty"`
+	// Notify (connect): also prompt the member through the provider's own
+	// channel (a chat card), beside the page it answers in Open.
+	Notify bool `json:"notify,omitempty"`
 	// Params are the connector's per-system values for the provider.
 	Params map[string]string `json:"params,omitempty"`
 	// Options are the member's choices on this connection, every option
@@ -98,4 +104,8 @@ type Answer struct {
 	ExpiresAtMs int64             `json:"expiresAtMs,omitempty"`
 	Reconnect   bool              `json:"reconnect,omitempty"`
 	Admin       bool              `json:"admin,omitempty"`
+	// Open (connect, Pending): an https page the member opens in their
+	// browser to do what Pending asks (a consent page); the connection
+	// completes when the provider later answers Connected.
+	Open string `json:"open,omitempty"`
 }

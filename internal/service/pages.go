@@ -110,6 +110,10 @@ type systemRow struct {
 	Check string
 	// Options are a connected provider connector's member options, as set.
 	Options []optionRow
+	// Waiting: the connection waits for the member's consent at Open
+	// (consent_wait.go); the page refreshes until it arrives.
+	Waiting bool
+	Open    string
 }
 
 // optionRow is one member option of a connection, on or off.
@@ -143,7 +147,7 @@ func (s *Service) connectionsPage(w http.ResponseWriter, r *http.Request, m comp
 				extra[name] = strings.TrimSpace(v[0])
 			}
 		}
-		s.connect(w, ctx, m, form.Get("system"), form.Get("reach"), key, extra)
+		s.connect(w, ctx, m, form.Get("system"), form.Get("reach"), key, extra, form.Get("notify") == "1")
 		return
 	case "disconnect":
 		s.disconnect(w, ctx, m, form.Get("system"))
@@ -184,6 +188,12 @@ func (s *Service) connectionsPage(w http.ResponseWriter, r *http.Request, m comp
 		s.callbackPage(w, http.StatusNotFound, "Not found", "This page does not exist.")
 		return
 	}
+	// A consent given in the browser completes its connection here.
+	if pending, _ := s.enabled(ctx, m.Org); len(pending) > 0 {
+		for _, c := range pending {
+			s.settleWait(ctx, m.Subject, m.Org, c)
+		}
+	}
 	systems, err := s.systems(ctx, m.Subject, m.Org)
 	if err != nil {
 		s.callbackPage(w, http.StatusBadGateway, "Connections", "Your connections cannot be read right now.")
@@ -207,6 +217,10 @@ func (s *Service) connectionsPage(w http.ResponseWriter, r *http.Request, m comp
 			row.Help, row.Signs, row.Extra = c.Connect.APIKey.Help, c.Connect.APIKey.Sign != nil, c.Connect.APIKey.Extra
 		case c.Connect.Provider != nil:
 			row.Help = c.Connect.Provider.Help
+			if wt, ok := s.consentWaitFor(ctx, m.Subject, m.Org, c.Name); ok && !v.Connected {
+				row.Waiting, row.Open = true, wt.Open
+				checking = true
+			}
 			if v.Connected {
 				g, _, _ := s.grant(ctx, m.Subject, m.Org, c.Name)
 				vals := c.Connect.Provider.OptionValues(g.Options)
@@ -257,8 +271,8 @@ func (s *Service) connectionsPage(w http.ResponseWriter, r *http.Request, m comp
 	})
 }
 
-func (s *Service) connect(w http.ResponseWriter, ctx context.Context, m component.Member, name, reach, key string, extra map[string]string) {
-	r := s.connectTo(ctx, m, name, reach, key, extra)
+func (s *Service) connect(w http.ResponseWriter, ctx context.Context, m component.Member, name, reach, key string, extra map[string]string, notify bool) {
+	r := s.connectTo(ctx, m, name, reach, key, extra, notify)
 	if r.audit != nil {
 		audit(w, *r.audit)
 	}
@@ -280,9 +294,11 @@ type connectResult struct {
 }
 
 // connectTo connects the member to a system: a sign-in to start (OAuth), a
-// key (apiKey), or the provider's connect. One owner for the page and the
-// card's in-place Connect.
-func (s *Service) connectTo(ctx context.Context, m component.Member, name, reach, key string, extra map[string]string) connectResult {
+// key (apiKey), or the provider's connect: a consent page to open (the
+// connection then waits for it, consent_wait.go), or with notify the
+// provider's own prompt (a chat card) instead. One owner for the page and
+// the card's in-place Connect.
+func (s *Service) connectTo(ctx context.Context, m component.Member, name, reach, key string, extra map[string]string, notify bool) connectResult {
 	c, ok := s.connectorNamed(ctx, m.Org, name)
 	if !ok {
 		return connectResult{msg: "That system is not enabled.", err: true}
@@ -332,13 +348,19 @@ func (s *Service) connectTo(ctx context.Context, m component.Member, name, reach
 		}
 		return connected(g)
 	case connector.KindProvider:
-		a, err := s.callProvider(ctx, c, m.Org, provider.ConnectPath, provider.Call{Member: m.Subject, Org: m.Org, Reach: reach})
+		a, err := s.callProvider(ctx, c, m.Org, provider.ConnectPath, provider.Call{Member: m.Subject, Org: m.Org, Reach: reach, Notify: notify})
 		switch {
 		case err != nil:
 			return connectResult{msg: err.Error(), err: true}
 		case a.Status == provider.Connected:
 			return connected(Grant{Connector: c.Name, Reach: reach, ProviderGrant: a.Grant, ConnectedAtMs: s.now().UnixMilli()})
+		case a.Status == provider.Pending && a.Open != "" && !notify:
+			s.noteWait(ctx, m.Subject, m.Org, c.Name, a.Open)
+			return connectResult{msg: firstNonEmpty(a.Message, "Authorize in the page that opened; the connection completes on its own."), open: a.Open}
 		case a.Status == provider.Pending:
+			if a.Open != "" {
+				s.noteWait(ctx, m.Subject, m.Org, c.Name, a.Open)
+			}
 			return connectResult{msg: firstNonEmpty(a.Message, "Confirm the request you were sent, then connect again.")}
 		default:
 			msg := firstNonEmpty(a.Message, c.DisplayName+" could not be connected.")

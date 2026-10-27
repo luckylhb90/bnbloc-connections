@@ -33,6 +33,13 @@ label{display:block;margin:6px 0 2px;font-size:13px;color:var(--muted)}table{bor
 // A form being sent says so at once: its button is held and tells what it
 // waits for (data-busy), so a slow answer is never taken for a missed click.
 document.addEventListener("submit", function (e) {
+  // A connection whose consent opens in a new tab: this page shows it
+  // waiting (and completes it) once the request is sent.
+  var wait = e.target.getAttribute("data-wait");
+  if (wait) {
+    setTimeout(function () { location.href = location.pathname + "?system=" + encodeURIComponent(wait); }, 800);
+    return;
+  }
   var b = e.submitter || e.target.querySelector("button");
   if (!b) return;
   if (b.name) { var h = document.createElement("input"); h.type = "hidden"; h.name = b.name; h.value = b.value; e.target.appendChild(h); }
