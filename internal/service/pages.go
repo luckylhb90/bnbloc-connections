@@ -204,13 +204,15 @@ func (s *Service) connectionsPage(w http.ResponseWriter, r *http.Request, m comp
 	ws = slices.DeleteFunc(ws, func(wk Worker) bool { return !wk.Serves(m.Subject, component.DriveOwn) })
 	q := r.URL.Query()
 	rows := make([]systemRow, 0, len(systems))
-	checking := false
+	var live []string // what the page waits for (liveState)
 	for i, v := range systems {
 		c := list[i]
 		row := systemRow{SystemView: v, Kind: c.Connect.Kind, Highlight: q.Get("system") == v.Name, Workers: ws, Chosen: s.choice(ctx, m.Subject, m.Org, c.Name)}
 		if t, ok := s.lastCheck(ctx, m.Subject, m.Org, c.Name); ok && v.Connected {
 			row.Check = t.View(s.now())
-			checking = checking || t.Waiting(s.now())
+			if t.Waiting(s.now()) {
+				live = append(live, c.Name+":check")
+			}
 		}
 		switch {
 		case c.Connect.APIKey != nil:
@@ -219,7 +221,7 @@ func (s *Service) connectionsPage(w http.ResponseWriter, r *http.Request, m comp
 			row.Help = c.Connect.Provider.Help
 			if wt, ok := s.consentWaitFor(ctx, m.Subject, m.Org, c.Name); ok && !v.Connected {
 				row.Waiting, row.Open = true, wt.Open
-				checking = true
+				live = append(live, c.Name+":consent")
 			}
 			if v.Connected {
 				g, _, _ := s.grant(ctx, m.Subject, m.Org, c.Name)
@@ -267,7 +269,7 @@ func (s *Service) connectionsPage(w http.ResponseWriter, r *http.Request, m comp
 	render(w, http.StatusOK, "connections", map[string]any{
 		"Title": "Connections", "Member": m.Subject, "Admin": m.Admin, "Systems": rows, "Activity": acts, "Waiting": waiting, "Base": m.PageURL,
 		"Room": m.Room, "RoomOwner": m.RoomRole == component.RoomOwner, "InRoom": inRoom, "MyWorkers": ws,
-		"Msg": q.Get("msg"), "Err": q.Get("err") != "", "Refresh": checking,
+		"Msg": q.Get("msg"), "Err": q.Get("err") != "", "Refresh": len(live) > 0, "State": strings.Join(live, " "),
 	})
 }
 
@@ -354,14 +356,15 @@ func (s *Service) connectTo(ctx context.Context, m component.Member, name, reach
 			return connectResult{msg: err.Error(), err: true}
 		case a.Status == provider.Connected:
 			return connected(Grant{Connector: c.Name, Reach: reach, ProviderGrant: a.Grant, ConnectedAtMs: s.now().UnixMilli()})
-		case a.Status == provider.Pending && a.Open != "" && !notify:
-			s.noteWait(ctx, m.Subject, m.Org, c.Name, a.Open)
-			return connectResult{msg: firstNonEmpty(a.Message, "Authorize in the page that opened; the connection completes on its own."), open: a.Open}
 		case a.Status == provider.Pending:
-			if a.Open != "" {
-				s.noteWait(ctx, m.Subject, m.Org, c.Name, a.Open)
+			// The connection waits for what the member does outside bnbloc,
+			// and completes on its own (consent_wait.go).
+			s.noteWait(ctx, m.Subject, m.Org, c.Name, a.Open)
+			r := connectResult{msg: firstNonEmpty(a.Message, "Confirm the request you were sent; the connection completes on its own.")}
+			if a.Open != "" && !notify {
+				r.open = a.Open
 			}
-			return connectResult{msg: firstNonEmpty(a.Message, "Confirm the request you were sent, then connect again.")}
+			return r
 		default:
 			msg := firstNonEmpty(a.Message, c.DisplayName+" could not be connected.")
 			if a.Admin {
@@ -768,7 +771,7 @@ func (s *Service) adminPage(w http.ResponseWriter, r *http.Request, m component.
 		return
 	}
 	rows := make([]adminRow, 0, len(list))
-	pending := false
+	var live []string // what the page waits for (liveState)
 	for _, c := range list {
 		sec := s.secrets(ctx, m.Org, c.Name)
 		row := adminRow{C: c, JSON: pretty(c), HasClientSecret: sec.ClientSecret != "", HasProviderSecret: sec.ProviderSecret != "",
@@ -783,22 +786,33 @@ func (s *Service) adminPage(w http.ResponseWriter, r *http.Request, m component.
 		row.ReviewBlock = reviewBlock{R: row.Review, Name: c.Name, Base: m.PageURL}
 		if t, ok := s.lastTry(ctx, m.Org, c.Name, reviewHash(c)); ok {
 			row.Try = t.View(s.now())
-			pending = pending || t.Waiting(s.now())
+			if t.Waiting(s.now()) {
+				live = append(live, c.Name+":try")
+			}
 		}
-		pending = pending || row.Review.Pending || row.Proposal.Pending
+		if row.Review.Pending {
+			live = append(live, c.Name+":review")
+		}
+		if row.Proposal.Pending {
+			live = append(live, c.Name+":proposal")
+		}
 		rows = append(rows, row)
 	}
 	var drafts []draftRow
 	for _, d := range s.drafts(ctx, m.Org) {
 		row := draftRow{Draft: d, JSON: pretty(d.Connector), Review: s.ensureReview(ctx, m.Org, m.Subject, d.Connector, true, false)}
 		row.ReviewBlock = reviewBlock{R: row.Review, Name: d.Connector.Name, Draft: true, Base: m.PageURL}
-		pending = pending || row.Review.Pending
+		if row.Review.Pending {
+			live = append(live, "draft:"+d.Connector.Name+":review")
+		}
 		drafts = append(drafts, row)
 	}
 	q := r.URL.Query()
 	drafting := s.draftings(ctx, m.Org)
-	for _, d := range drafting {
-		pending = pending || d.Error == ""
+	for i, d := range drafting {
+		if d.Error == "" {
+			live = append(live, "drafting:"+strconv.Itoa(i))
+		}
 	}
-	render(w, http.StatusOK, "admin", map[string]any{"Title": "Connectors", "Connectors": rows, "Drafts": drafts, "Drafting": drafting, "Base": m.PageURL, "Msg": q.Get("msg"), "Err": q.Get("err") != "", "Refresh": pending})
+	render(w, http.StatusOK, "admin", map[string]any{"Title": "Connectors", "Connectors": rows, "Drafts": drafts, "Drafting": drafting, "Base": m.PageURL, "Msg": q.Get("msg"), "Err": q.Get("err") != "", "Refresh": len(live) > 0, "State": strings.Join(live, " ")})
 }

@@ -10,11 +10,11 @@ import (
 	"github.com/luckylhb90/bnbloc-connections/provider"
 )
 
-// A provider's consent the member gives in their browser (provider.Answer
-// Open): the connection waits for it, and completes without another click
-// when the provider answers a check Connected: on the Connections page
-// (which refreshes while one waits) or at the member's agent's next
-// request to that system.
+// A provider's consent the member gives outside bnbloc (a chat card, or the
+// page provider.Answer.Open names): the connection waits for it, and
+// completes without another click when the provider answers a check
+// Connected: on the Connections page (which refreshes while one waits) or
+// at the member's agent's next request to that system.
 
 // consentWaitTTL is how long a connection waits for its consent; then the
 // member presses Connect again.
@@ -28,11 +28,12 @@ type consentWait struct {
 
 func consentWaitKey(org, name string) string { return "consentwait:" + org + ":" + name }
 
-// noteWait records that member's connection to name waits for the consent
-// at open (an https page only).
+// noteWait records that member's connection to name waits for their
+// consent, given at open (an https page; "" when the provider prompts them
+// its own way, a chat card).
 func (s *Service) noteWait(ctx context.Context, member, org, name, open string) {
-	if u, err := url.Parse(open); err != nil || u.Scheme != "https" || u.Host == "" {
-		return
+	if u, err := url.Parse(open); open != "" && (err != nil || u.Scheme != "https" || u.Host == "") {
+		open = ""
 	}
 	_ = s.P.PutJSON(ctx, platform.Member(member), consentWaitKey(org, name), consentWait{Open: open, AtMs: s.now().UnixMilli()})
 }

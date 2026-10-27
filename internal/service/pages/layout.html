@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{{.Title}}</title>
-{{if .Refresh}}<meta http-equiv="refresh" content="5">{{end}}
+{{if .Refresh}}<meta name="live" content="{{.State}}">{{end}}
 <style>
 :root{--bg:#fff;--fg:#1d1d1f;--muted:#6e6e73;--line:#e5e5ea;--card:#f7f7f8;--accent:#3a5bd9;--danger:#c0392b;--ok:#1e8e3e}
 @media (prefers-color-scheme: dark){:root{--bg:#141416;--fg:#ececf0;--muted:#9a9aa3;--line:#2c2c31;--card:#1c1c20;--accent:#7d97ff;--danger:#ff6b5e;--ok:#4cc36f}}
@@ -32,14 +32,32 @@ label{display:block;margin:6px 0 2px;font-size:13px;color:var(--muted)}table{bor
 <script>
 // A form being sent says so at once: its button is held and tells what it
 // waits for (data-busy), so a slow answer is never taken for a missed click.
+// Something the page waits for (a consent, a check, a try) is followed in
+// the background: the page asks itself every 5 seconds and reloads only
+// when what it waits for changed, never while the person is typing or
+// selecting, and stops after 15 minutes.
+(function () {
+  var live = document.querySelector('meta[name="live"]');
+  if (!live) return;
+  var start = Date.now();
+  var busy = function () {
+    var a = document.activeElement;
+    return (a && /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName)) || String(window.getSelection()) !== "";
+  };
+  var timer = setInterval(function () {
+    if (Date.now() - start > 15 * 60 * 1000) { clearInterval(timer); return; }
+    fetch(location.href, { credentials: "same-origin", cache: "no-store" })
+      .then(function (r) { return r.text(); })
+      .then(function (html) {
+        var next = new DOMParser().parseFromString(html, "text/html").querySelector('meta[name="live"]');
+        if ((next ? next.content : "") === live.content || busy()) return;
+        clearInterval(timer);
+        location.reload();
+      })
+      .catch(function () {});
+  }, 5000);
+})();
 document.addEventListener("submit", function (e) {
-  // A connection whose consent opens in a new tab: this page shows it
-  // waiting (and completes it) once the request is sent.
-  var wait = e.target.getAttribute("data-wait");
-  if (wait) {
-    setTimeout(function () { location.href = location.pathname + "?system=" + encodeURIComponent(wait); }, 800);
-    return;
-  }
   var b = e.submitter || e.target.querySelector("button");
   if (!b) return;
   if (b.name) { var h = document.createElement("input"); h.type = "hidden"; h.name = b.name; h.value = b.value; e.target.appendChild(h); }

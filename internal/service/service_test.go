@@ -576,6 +576,11 @@ func TestProviderConnectAndAuthorize(t *testing.T) {
 	if msg := connect(); !strings.Contains(msg, "consent card") || fx.store.get("members/maya/grant:home:issues") != nil {
 		t.Fatalf("pending connect = %q", msg)
 	}
+	// A pending answer without a page (a chat card) waits too, followed in
+	// the background rather than by reloading the page.
+	if body := fx.page(false, http.MethodGet, "/pages/connections", nil).Body.String(); !strings.Contains(body, "Authorize in the request you were sent") || !strings.Contains(body, `<meta name="live" content="issues:consent">`) || strings.Contains(body, "http-equiv") {
+		t.Fatalf("the waiting row without a page:\n%s", body)
+	}
 	mu.Lock()
 	consented = true
 	mu.Unlock()

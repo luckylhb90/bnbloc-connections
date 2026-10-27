@@ -29,7 +29,7 @@
       <div class="muted">{{.Purpose}}</div>
       <div class="muted">{{range $i, $h := .Hosts}}{{if $i}}, {{end}}{{$h}}{{end}}</div>
       {{if .Check}}<div class="muted">Checked: {{.Check}}</div>{{end}}
-      {{if .Waiting}}<div class="muted"><span class="pill">waiting for your authorization</span> Authorize in the page that opened; this page completes on its own.</div>{{end}}
+      {{if .Waiting}}<div class="muted"><span class="pill">waiting for your authorization</span> {{if .Open}}Authorize in the page that opened{{else}}Authorize in the request you were sent{{end}}; this page completes on its own.</div>{{end}}
       {{if .Connected}}<div class="muted">{{if .As}}As {{.As}} (a digital worker) · {{end}}Changes: {{if eq .Changes "allowed"}}made without asking{{else}}each one asks you first{{end}}</div>{{end}}
       {{$sys := .Name}}{{range .Options}}<form method="post" action="{{$.Base}}option"><input type="hidden" name="system" value="{{$sys}}"><input type="hidden" name="key" value="{{.Key}}"><input type="hidden" name="value" value="{{if .On}}false{{else}}true{{end}}"><span class="muted">{{.Label}}: {{if .On}}on{{else}}off{{end}}</span> <button>{{if .On}}Turn off{{else}}Turn on{{end}}</button></form>{{end}}
       {{if .Workers}}{{$sys := .}}<form method="post" action="{{$.Base}}actas"><input type="hidden" name="system" value="{{.Name}}"><label>Your agents act as
@@ -46,10 +46,8 @@
       <form method="post" action="{{$.Base}}disconnect"><input type="hidden" name="system" value="{{.Name}}"><button class="danger">Disconnect</button></form>
     {{else if eq .Kind "apiKey"}}
     {{else if .Waiting}}
-      <a href="{{.Open}}" target="_blank" rel="noopener"><button class="primary">Open the authorization page</button></a>
-      <form method="post" action="{{$.Base}}connect"><input type="hidden" name="system" value="{{.Name}}"><input type="hidden" name="reach" value="read"><input type="hidden" name="notify" value="1"><button>Send it to me in chat instead</button></form>
-    {{else if eq .Kind "provider"}}
-      <form method="post" action="{{$.Base}}connect" target="_blank" data-wait="{{.Name}}"><input type="hidden" name="system" value="{{.Name}}"><input type="hidden" name="reach" value="read"><button class="primary">Connect</button></form>
+      {{if .Open}}<a href="{{.Open}}" target="_blank" rel="noopener"><button class="primary">Open the authorization page</button></a>{{end}}
+      <form method="post" action="{{$.Base}}connect"><input type="hidden" name="system" value="{{.Name}}"><input type="hidden" name="reach" value="read"><input type="hidden" name="notify" value="1"><button>Send it again</button></form>
     {{else}}
       <form method="post" action="{{$.Base}}connect"><input type="hidden" name="system" value="{{.Name}}"><input type="hidden" name="reach" value="read"><button class="primary">Connect</button></form>
     {{end}}

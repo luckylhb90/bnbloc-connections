@@ -170,7 +170,7 @@ func TestTryFromTheMembersComputer(t *testing.T) {
 	if n := len(fx.store.sends); n != 1 || fx.store.sends[0].URL != "https://example.com/api/me" || fx.store.sends[0].Method != "GET" || fx.store.sends[0].Act == "" {
 		t.Fatalf("sends = %+v", fx.store.sends)
 	}
-	if page := fx.adminPage(); !strings.Contains(page, "waiting for the answer") || !strings.Contains(page, "http-equiv=\"refresh\"") {
+	if page := fx.adminPage(); !strings.Contains(page, "waiting for the answer") || !strings.Contains(page, `<meta name="live" content="`) {
 		t.Fatal("the admin page does not show the try under way")
 	}
 	in := component.EgressRequest{Method: "GET", URL: "https://example.com/api/me"}
