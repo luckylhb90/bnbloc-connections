@@ -120,6 +120,8 @@ type systemRow struct {
 	// provider's own prompt.
 	OpenIn   string
 	OpenWith string // connector.Provider.OpenWith, space-separated
+	// Base is the page's address, for the row's forms.
+	Base string
 }
 
 // optionRow is one member option of a connection, on or off.
@@ -213,7 +215,7 @@ func (s *Service) connectionsPage(w http.ResponseWriter, r *http.Request, m comp
 	var live []string // what the page waits for (liveState)
 	for i, v := range systems {
 		c := list[i]
-		row := systemRow{SystemView: v, Kind: c.Connect.Kind, Highlight: q.Get("system") == v.Name, Workers: ws, Chosen: s.choice(ctx, m.Subject, m.Org, c.Name)}
+		row := systemRow{SystemView: v, Kind: c.Connect.Kind, Highlight: q.Get("system") == v.Name, Workers: ws, Chosen: s.choice(ctx, m.Subject, m.Org, c.Name), Base: m.PageURL}
 		if t, ok := s.lastCheck(ctx, m.Subject, m.Org, c.Name); ok && v.Connected {
 			row.Check = t.View(s.now())
 			if t.Waiting(s.now()) {
@@ -238,6 +240,16 @@ func (s *Service) connectionsPage(w http.ResponseWriter, r *http.Request, m comp
 			}
 		}
 		rows = append(rows, row)
+	}
+	// The page groups the systems: waiting for the member, connected, the rest.
+	var nConnected, nPending int
+	for _, r := range rows {
+		switch {
+		case r.Connected:
+			nConnected++
+		case r.Waiting:
+			nPending++
+		}
 	}
 	var acts []activityRow
 	calls := s.activity(ctx, m.Subject, m.Org)
@@ -278,6 +290,7 @@ func (s *Service) connectionsPage(w http.ResponseWriter, r *http.Request, m comp
 	}
 	render(w, http.StatusOK, "connections", map[string]any{
 		"Title": "Connections", "Member": m.Subject, "Admin": m.Admin, "Systems": rows, "Activity": acts, "Waiting": waiting, "Base": m.PageURL,
+		"NConnected": nConnected, "NPending": nPending, "NAvailable": len(rows) - nConnected - nPending,
 		"Room": m.Room, "RoomOwner": m.RoomRole == component.RoomOwner, "InRoom": inRoom, "MyWorkers": ws,
 		"Msg": q.Get("msg"), "Err": q.Get("err") != "", "Refresh": len(live) > 0, "State": strings.Join(live, " "),
 	})
@@ -828,5 +841,11 @@ func (s *Service) adminPage(w http.ResponseWriter, r *http.Request, m component.
 		writeLive(w, strings.Join(live, " "), q.Get("live"))
 		return
 	}
-	render(w, http.StatusOK, "admin", map[string]any{"Title": "Connectors", "Connectors": rows, "Drafts": drafts, "Drafting": drafting, "Base": m.PageURL, "Msg": q.Get("msg"), "Err": q.Get("err") != "", "Refresh": len(live) > 0, "State": strings.Join(live, " ")})
+	enabled := 0
+	for _, r := range rows {
+		if r.C.Enabled {
+			enabled++
+		}
+	}
+	render(w, http.StatusOK, "admin", map[string]any{"Title": "Connectors", "Connectors": rows, "NEnabled": enabled, "Drafts": drafts, "Drafting": drafting, "Base": m.PageURL, "Msg": q.Get("msg"), "Err": q.Get("err") != "", "Refresh": len(live) > 0, "State": strings.Join(live, " ")})
 }

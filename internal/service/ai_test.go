@@ -133,7 +133,7 @@ func TestRulesProposedFromUse(t *testing.T) {
 		t.Fatalf("a repeat proposed again: %+v", runs)
 	}
 	page := fx.adminPage()
-	if !strings.Contains(page, "POST /search/*") || !strings.Contains(page, "Agents then call it without asking.") || !strings.Contains(page, "2 refused requests") {
+	if !strings.Contains(page, `class="path">/search/*<`) || !strings.Contains(page, "Agents then call it without asking.") || !strings.Contains(page, "2 refused requests") {
 		t.Fatalf("the page = %s", page)
 	}
 	rec := fx.page(true, http.MethodPost, "/pages/admin/addrule", url.Values{"name": {"issues"}, "id": {p.Rules[0].ID}})

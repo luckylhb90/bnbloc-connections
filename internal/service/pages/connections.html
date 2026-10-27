@@ -1,78 +1,163 @@
 {{define "body"}}
-<h1>Connections</h1>
-<p class="sub">The systems your own agents reach as you, {{.Member}}. Nobody else's agent uses your connections, and a change asks you first unless you allow changes for that system.</p>
-{{if .Room}}
-<h2>In this room</h2>
-<p class="sub">Who agents act as here, per system.{{if .RoomOwner}} As the room's owner you set a digital worker for everyone: by default (each member may still act as themselves) or required.{{end}} A worker acts only for the members and agents its audience allows.</p>
-<table><tr><th>System</th><th>Everyone here</th><th>You here</th></tr>
-{{range .InRoom}}{{$r := .}}<tr><td>{{.C.DisplayName}}</td>
-<td>{{if $.RoomOwner}}<form method="post" action="{{$.Base}}roomidentity"><input type="hidden" name="system" value="{{.C.Name}}">
-<select name="worker"><option value="">no room setting</option>{{range .Workers}}<option value="{{.ID}}"{{if and $r.HasRoom (eq .ID $r.Room.Worker)}} selected{{end}}>{{.DisplayName}}</option>{{end}}</select>
-<select name="mode"><option value="default"{{if eq .Room.Mode "default"}} selected{{end}}>by default</option><option value="required"{{if eq .Room.Mode "required"}} selected{{end}}>required</option></select>
-<button>Save</button></form>{{else if .HasRoom}}{{.RoomName}} ({{if eq .Room.Mode "required"}}required{{else}}by default{{end}}){{else}}<span class="muted">no room setting</span>{{end}}</td>
-<td>{{if and .HasRoom (eq .Room.Mode "required")}}<span class="muted">as {{.RoomName}}, required here</span>{{else}}<form method="post" action="{{$.Base}}myidentity"><input type="hidden" name="system" value="{{.C.Name}}">
-<select name="worker"><option value="">{{if .HasRoom}}as {{.RoomName}} (the room's){{else}}as you{{end}}</option><option value="self"{{if eq .Mine "self"}} selected{{end}}>as you</option>{{range $.MyWorkers}}<option value="{{.ID}}"{{if eq .ID $r.Mine}} selected{{end}}>as {{.DisplayName}}</option>{{end}}</select>
-<button>Save</button></form>{{end}}</td></tr>{{end}}
-</table>
-{{end}}
+<div class="head">
+  <div>
+    <p class="eyebrow">Connections</p>
+    <h1>Your connections</h1>
+    <p class="sub">The systems your own agents reach as you, {{.Member}}. Nobody else's agent uses them, and a change asks you first unless you allow changes for that system.</p>
+  </div>
+  {{if .Systems}}<div class="stats">
+    <div class="stat"><b>{{.NConnected}}<span> / {{len .Systems}}</span></b><span>connected</span></div>
+    {{if .Waiting}}<div class="stat"><b>{{len .Waiting}}</b><span>to review</span></div>{{end}}
+  </div>{{end}}
+</div>
+
 {{if .Waiting}}
-<h2>Changes waiting for you</h2>
-{{range .Waiting}}<div class="card"><div class="row"><div><strong>{{.Request.Method}} {{.Path}}</strong> in {{.System}}<div class="muted">Asked {{.When}} UTC in room {{.Room}}</div></div>
-<div><a href="{{$.Base}}change?id={{.ID}}"><button class="primary">Review</button></a></div></div></div>{{end}}
+<section>
+  <div class="sec"><h2>Changes waiting for you <span class="n">{{len .Waiting}}</span></h2></div>
+  <div class="list">
+  {{range .Waiting}}
+    <div class="card item"><div class="item-top">
+      <div class="item-main">
+        <div class="item-title"><span class="method {{.Request.Method}}">{{.Request.Method}}</span><span class="path">{{.Path}}</span></div>
+        <div class="meta"><span class="chip">{{.System}}</span><span class="chip">asked {{.When}} UTC</span><span class="chip">room {{.Room}}</span></div>
+      </div>
+      <div class="item-actions"><a class="btn primary" href="{{$.Base}}change?id={{.ID}}">Review</a></div>
+    </div></div>
+  {{end}}
+  </div>
+</section>
 {{end}}
-{{if not .Systems}}<div class="card">Your organization has not enabled any system yet.{{if .Admin}} Add one on the Connectors page.{{end}}</div>{{end}}
-{{range .Systems}}
-<div class="card{{if .Highlight}} hl{{end}}" id="{{.Name}}">
-  <div class="row">
-    <div>
-      <strong>{{.DisplayName}}</strong> {{if .Connected}}<span class="pill ok">connected</span>{{else}}<span class="pill">not connected</span>{{end}}
-      <div class="muted">{{.Purpose}}</div>
-      <div class="muted">{{range $i, $h := .Hosts}}{{if $i}}, {{end}}{{$h}}{{end}}</div>
-      {{if .Check}}<div class="muted">Checked: {{.Check}}</div>{{end}}
-      {{if .Waiting}}<div class="muted"><span class="pill">waiting for your authorization</span> {{if .Open}}Authorize in the page that opened{{else}}Authorize in the request you were sent{{end}}; this page completes on its own.</div>{{end}}
-      {{if .Connected}}<div class="muted">{{if .As}}As {{.As}} (a digital worker) · {{end}}Changes: {{if eq .Changes "allowed"}}made without asking{{else}}each one asks you first{{end}}</div>{{end}}
-      {{$sys := .Name}}{{range .Options}}<form method="post" action="{{$.Base}}option"><input type="hidden" name="system" value="{{$sys}}"><input type="hidden" name="key" value="{{.Key}}"><input type="hidden" name="value" value="{{if .On}}false{{else}}true{{end}}"><span class="muted">{{.Label}}: {{if .On}}on{{else}}off{{end}}</span> <button>{{if .On}}Turn off{{else}}Turn on{{end}}</button></form>{{end}}
-      {{if .Workers}}{{$sys := .}}<form method="post" action="{{$.Base}}actas"><input type="hidden" name="system" value="{{.Name}}"><label>Your agents act as
-        <select name="worker"><option value="">you</option>{{range .Workers}}<option value="{{.ID}}"{{if eq .ID $sys.Chosen}} selected{{end}}>{{.DisplayName}} (digital worker)</option>{{end}}</select>
-        <button>Save</button></label></form>{{end}}
+
+{{if .Room}}
+<section>
+  <div class="sec"><h2>In this room</h2></div>
+  <p class="muted" style="margin:-4px 0 12px">Who agents act as here, per system.{{if .RoomOwner}} As the room's owner you set a digital worker for everyone: by default (each member may still act as themselves) or required.{{end}} A worker acts only for the members and agents its audience allows.</p>
+  <div class="card table-wrap"><table>
+    <tr><th>System</th><th>Everyone here</th><th>You here</th></tr>
+    {{range .InRoom}}{{$r := .}}<tr>
+      <td><strong>{{.C.DisplayName}}</strong></td>
+      <td>{{if $.RoomOwner}}<form method="post" action="{{$.Base}}roomidentity"><input type="hidden" name="system" value="{{.C.Name}}">
+        <select name="worker" aria-label="Everyone here acts as"><option value="">no room setting</option>{{range .Workers}}<option value="{{.ID}}"{{if and $r.HasRoom (eq .ID $r.Room.Worker)}} selected{{end}}>{{.DisplayName}}</option>{{end}}</select>
+        <select name="mode" aria-label="How"><option value="default"{{if eq .Room.Mode "default"}} selected{{end}}>by default</option><option value="required"{{if eq .Room.Mode "required"}} selected{{end}}>required</option></select>
+        <button class="sm">Save</button></form>
+      {{else if .HasRoom}}{{.RoomName}} <span class="chip">{{if eq .Room.Mode "required"}}required{{else}}by default{{end}}</span>{{else}}<span class="subtle">no room setting</span>{{end}}</td>
+      <td>{{if and .HasRoom (eq .Room.Mode "required")}}<span class="subtle">as {{.RoomName}}, required here</span>{{else}}<form method="post" action="{{$.Base}}myidentity"><input type="hidden" name="system" value="{{.C.Name}}">
+        <select name="worker" data-autosubmit aria-label="You act as"><option value="">{{if .HasRoom}}as {{.RoomName}} (the room's){{else}}as you{{end}}</option><option value="self"{{if eq .Mine "self"}} selected{{end}}>as you</option>{{range $.MyWorkers}}<option value="{{.ID}}"{{if eq .ID $r.Mine}} selected{{end}}>as {{.DisplayName}}</option>{{end}}</select>
+      </form>{{end}}</td>
+    </tr>{{end}}
+  </table></div>
+</section>
+{{end}}
+
+{{if not .Systems}}
+<div class="card empty"><strong>Nothing to connect yet</strong>Your organization has not enabled any system.{{if .Admin}} Add one on the Connectors page.{{end}}</div>
+{{else}}
+{{if gt (len .Systems) 5}}<div class="sec" style="margin-top:28px;justify-content:flex-end"><div class="search"><input type="search" placeholder="Find a system" data-filter aria-label="Find a system"></div></div>{{end}}
+{{if .NPending}}<section data-group>
+  <div class="sec"><h2>Waiting for you <span class="n">{{.NPending}}</span></h2></div>
+  <div class="list">{{range .Systems}}{{if and .Waiting (not .Connected)}}{{template "system" .}}{{end}}{{end}}</div>
+</section>{{end}}
+{{if .NConnected}}<section data-group>
+  <div class="sec"><h2>Connected <span class="n">{{.NConnected}}</span></h2></div>
+  <div class="list">{{range .Systems}}{{if .Connected}}{{template "system" .}}{{end}}{{end}}</div>
+</section>{{end}}
+{{if .NAvailable}}<section data-group>
+  <div class="sec"><h2>Available <span class="n">{{.NAvailable}}</span></h2></div>
+  <div class="list">{{range .Systems}}{{if not (or .Connected .Waiting)}}{{template "system" .}}{{end}}{{end}}</div>
+</section>{{end}}
+{{end}}
+
+{{if .Activity}}
+<section>
+  <div class="sec"><h2>Recent calls</h2></div>
+  <div class="card table-wrap"><table>
+    <tr><th>When (UTC)</th><th>System</th><th>Request</th><th>Result</th></tr>
+    {{range .Activity}}<tr><td class="num">{{.When}}</td><td>{{.Connector}}</td><td><span class="method {{.Method}}">{{.Method}}</span><span class="path">{{.Path}}</span></td><td class="out out-{{.Outcome}}">{{if .Status}}{{.Status}} {{end}}{{.Outcome}}</td></tr>{{end}}
+  </table></div>
+</section>
+{{end}}
+{{end}}
+
+{{define "system"}}
+<div class="card item{{if .Highlight}} hl{{end}}" id="{{.Name}}" data-search="{{.DisplayName}} {{.Name}} {{.Purpose}}{{range .Hosts}} {{.}}{{end}}">
+  <div class="item-top">
+    <div class="mono-av" data-mono="{{.DisplayName}}" aria-hidden="true"></div>
+    <div class="item-main">
+      <div class="item-title"><strong>{{.DisplayName}}</strong>
+        {{if .Connected}}<span class="status ok">Connected</span>{{else if .Waiting}}<span class="status warn">Waiting for you</span>{{else}}<span class="status">Not connected</span>{{end}}
+      </div>
+      {{if .Purpose}}<div class="item-desc">{{.Purpose}}</div>{{end}}
+      <div class="meta">{{range .Hosts}}<span class="chip mono">{{.}}</span>{{end}}{{if .As}}<span class="chip">as {{.As}} (a digital worker)</span>{{end}}</div>
     </div>
-    <div>
+    <div class="item-actions">
     {{if .Connected}}
-      {{if eq .Changes "allowed"}}
-      <form method="post" action="{{$.Base}}reach"><input type="hidden" name="system" value="{{.Name}}"><input type="hidden" name="reach" value="read"><button>Ask me for changes</button></form>
-      {{else}}
-      <form method="post" action="{{$.Base}}reach"><input type="hidden" name="system" value="{{.Name}}"><input type="hidden" name="reach" value="write"><button>Allow changes</button></form>
-      {{end}}
-      <form method="post" action="{{$.Base}}disconnect"><input type="hidden" name="system" value="{{.Name}}"><button class="danger">Disconnect</button></form>
-    {{else if eq .Kind "apiKey"}}
     {{else if .Waiting}}
-      {{if .Open}}<a href="{{.Open}}" data-open-in="{{.OpenIn}}" data-open-with="{{.OpenWith}}" data-open-link><button class="primary">Open the authorization again</button></a>{{end}}
-      <form method="post" action="{{$.Base}}connect"><input type="hidden" name="system" value="{{.Name}}"><input type="hidden" name="reach" value="read"><input type="hidden" name="notify" value="1"><button>Send it to me in chat again</button></form>
+    {{else if eq .Kind "apiKey"}}
+      <button type="button" class="primary" data-reveal="key-{{.Name}}" aria-expanded="{{if .Highlight}}true{{else}}false{{end}}">Connect</button>
     {{else if eq .Kind "provider"}}
-      <form method="post" action="{{$.Base}}connect" data-open-in="{{.OpenIn}}" data-open-with="{{.OpenWith}}"><input type="hidden" name="system" value="{{.Name}}"><input type="hidden" name="reach" value="read"><input type="hidden" name="notify" value=""><button class="primary">Connect</button></form>
+      <form method="post" action="{{.Base}}connect" data-open-in="{{.OpenIn}}" data-open-with="{{.OpenWith}}"><input type="hidden" name="system" value="{{.Name}}"><input type="hidden" name="reach" value="read"><input type="hidden" name="notify" value=""><button class="primary" data-busy="Connecting…">Connect</button></form>
     {{else}}
-      <form method="post" action="{{$.Base}}connect"><input type="hidden" name="system" value="{{.Name}}"><input type="hidden" name="reach" value="read"><button class="primary">Connect</button></form>
+      <form method="post" action="{{.Base}}connect"><input type="hidden" name="system" value="{{.Name}}"><input type="hidden" name="reach" value="read"><button class="primary" data-busy="Connecting…">Connect</button></form>
     {{end}}
     </div>
   </div>
+
+  {{if and .Waiting (not .Connected)}}
+  <div class="callout warn">
+    <span class="spin" aria-hidden="true"></span>
+    <div class="grow">
+      <strong>Waiting for your authorization</strong>
+      <div class="muted">{{if .Open}}Press Allow on the authorization page.{{else}}Authorize in the request you were sent.{{end}} This page completes on its own.</div>
+      <div class="callout-actions">
+        {{if .Open}}<a class="btn primary sm" href="{{.Open}}" data-open-in="{{.OpenIn}}" data-open-with="{{.OpenWith}}" data-open-link>Open the authorization again</a>{{end}}
+        <form method="post" action="{{.Base}}connect"><input type="hidden" name="system" value="{{.Name}}"><input type="hidden" name="reach" value="read"><input type="hidden" name="notify" value="1"><button class="sm" data-busy="Sending…">Send it to me in chat again</button></form>
+      </div>
+    </div>
+  </div>
+  {{end}}
+
   {{if and (not .Connected) (eq .Kind "apiKey")}}
-  <form class="block" method="post" action="{{$.Base}}connect">
+  <form id="key-{{.Name}}" class="block reveal" method="post" action="{{.Base}}connect"{{if not .Highlight}} hidden{{end}}>
     <input type="hidden" name="system" value="{{.Name}}"><input type="hidden" name="reach" value="read">
-    <label for="key-{{.Name}}">{{if .Signs}}API key{{else}}Key{{end}}{{if .Help}} ({{.Help}}){{end}}</label>
-    <input id="key-{{.Name}}" type="password" name="key" autocomplete="off" required>
-    {{if .Signs}}<label for="secret-{{.Name}}">Secret key</label>
-    <input id="secret-{{.Name}}" type="password" name="secret" autocomplete="off" required>{{end}}
-    {{$sys := .Name}}{{range .Extra}}<label for="extra-{{$sys}}-{{.Name}}">{{.Label}}</label>
-    <input id="extra-{{$sys}}-{{.Name}}" type="password" name="extra-{{.Name}}" autocomplete="off" required>{{end}}
-    <p><button class="primary">Connect</button></p>
+    {{if .Help}}<p class="muted" style="margin:0 0 4px">{{.Help}}</p>{{end}}
+    <div class="form-grid">
+      <div{{if not .Signs}} class="wide"{{end}}><label for="key-in-{{.Name}}">{{if .Signs}}API key{{else}}Key{{end}}</label>
+      <input id="key-in-{{.Name}}" type="password" name="key" autocomplete="off" required></div>
+      {{if .Signs}}<div><label for="secret-{{.Name}}">Secret key</label>
+      <input id="secret-{{.Name}}" type="password" name="secret" autocomplete="off" required></div>{{end}}
+      {{$sys := .Name}}{{range .Extra}}<div><label for="extra-{{$sys}}-{{.Name}}">{{.Label}}</label>
+      <input id="extra-{{$sys}}-{{.Name}}" type="password" name="extra-{{.Name}}" autocomplete="off" required></div>{{end}}
+    </div>
+    <div class="form-actions"><button class="primary" data-busy="Connecting…">Connect</button><span class="subtle">Kept sealed; only your own agents use it.</span></div>
   </form>
-  {{else if and (not .Connected) .Help}}<div class="muted">{{.Help}}</div>{{end}}
+  {{else if and (not .Connected) (not .Waiting) .Help}}<p class="subtle" style="margin:12px 0 0 54px">{{.Help}}</p>{{end}}
+
+  {{if .Check}}<div class="subtle" style="margin:10px 0 0 54px">Last check: {{.Check}}</div>{{end}}
+
+  {{if or .Connected .Workers}}
+  <div class="item-foot">
+    {{if .Connected}}
+    <div class="field">Changes
+      <form method="post" action="{{.Base}}reach" class="seg"><input type="hidden" name="system" value="{{.Name}}">
+        <button {{if eq .Changes "allowed"}}name="reach" value="read" data-busy="…"{{else}}type="button" aria-pressed="true"{{end}}>Ask me first</button>
+        <button {{if eq .Changes "allowed"}}type="button" aria-pressed="true"{{else}}name="reach" value="write" data-busy="…"{{end}}>Allow without asking</button>
+      </form>
+    </div>
+    {{$sys := .Name}}{{$base := .Base}}{{range .Options}}
+    <form method="post" action="{{$base}}option"><input type="hidden" name="system" value="{{$sys}}"><input type="hidden" name="key" value="{{.Key}}"><input type="hidden" name="value" value="{{if .On}}false{{else}}true{{end}}">
+      <button class="switch" role="switch" aria-checked="{{if .On}}true{{else}}false{{end}}" title="{{.Label}}: {{if .On}}on{{else}}off{{end}}"><span class="track"></span>{{.Label}}</button>
+    </form>{{end}}
+    {{end}}
+    {{if .Workers}}{{$row := .}}
+    <form method="post" action="{{.Base}}actas" class="field"><input type="hidden" name="system" value="{{.Name}}">
+      <span>Your agents act as</span>
+      <select name="worker" data-autosubmit aria-label="Your agents act as"><option value="">you</option>{{range .Workers}}<option value="{{.ID}}"{{if eq .ID $row.Chosen}} selected{{end}}>{{.DisplayName}} (digital worker)</option>{{end}}</select>
+    </form>{{end}}
+    {{if .Connected}}
+    <form method="post" action="{{.Base}}disconnect" style="margin-left:auto" data-confirm="Disconnect {{.DisplayName}}? Your agents lose access to it until you connect again.">
+      <input type="hidden" name="system" value="{{.Name}}"><button class="ghost danger sm" data-busy="Disconnecting…">Disconnect</button>
+    </form>{{end}}
+  </div>
+  {{end}}
 </div>
-{{end}}
-{{if .Activity}}
-<h2>Recent calls</h2>
-<table><tr><th>When (UTC)</th><th>System</th><th>Request</th><th>Result</th></tr>
-{{range .Activity}}<tr><td>{{.When}}</td><td>{{.Connector}}</td><td>{{.Method}} {{.Path}}</td><td>{{if .Status}}{{.Status}} {{end}}{{.Outcome}}</td></tr>{{end}}
-</table>
-{{end}}
 {{end}}

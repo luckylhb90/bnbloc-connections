@@ -98,7 +98,7 @@ func TestWaitingChangesAreTheRoomsAndTheConnections(t *testing.T) {
 	if !strings.Contains(page, "Changes waiting for you") || !strings.Contains(page, "change?id="+q.Get("id")) {
 		t.Fatalf("the page = %s", page)
 	}
-	if rec := fx.page(false, http.MethodGet, "/pages/connections/change?id="+q.Get("id"), nil); !strings.Contains(rec.Body.String(), "POST /api/issue") {
+	if rec := fx.page(false, http.MethodGet, "/pages/connections/change?id="+q.Get("id"), nil); !strings.Contains(rec.Body.String(), `class="path">/api/issue`) {
 		t.Fatalf("the change from the page = %s", rec.Body)
 	}
 	if rec := fx.page(false, http.MethodPost, "/pages/connections/decide", url.Values{"id": {q.Get("id")}, "decision": {"allow"}}); !strings.Contains(rec.Body.String(), "Allowed") {

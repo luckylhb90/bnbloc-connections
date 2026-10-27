@@ -1,61 +1,147 @@
-{{define "review"}}{{$b := .}}{{with .R}}<div class="ai"><div class="muted">AI review{{if .Pending}}: reviewing…{{end}}</div>
+{{define "review"}}{{$b := .}}{{with .R}}<div class="ai">
+<div class="ai-head">AI review{{if .Pending}} <span class="spin" aria-hidden="true"></span> <span class="muted">reviewing…</span>{{end}}</div>
 {{if .Error}}<div class="muted">{{.Error}}</div>{{end}}
-{{if .Tried}}<div class="muted">Tried with your connection: {{.Tried}}</div>{{end}}
+{{if .Tried}}<div class="subtle">Tried with your connection: {{.Tried}}</div>{{end}}
 {{if .Summary}}<div>{{.Summary}}</div>{{end}}
-{{if .Reads}}<div class="muted">Reads without asking:</div><ul>{{range .Reads}}<li>{{.}}</li>{{end}}</ul>{{end}}
-{{if .Changes}}<div class="muted">Changes, after the member allows them:</div><ul>{{range .Changes}}<li>{{.}}</li>{{end}}</ul>{{end}}
-{{if .Findings}}<div class="muted">Findings:</div><ul>{{range $i, $f := .Findings}}<li><span class="sev-{{.Severity}}">{{.Severity}}</span>{{if .About}} · {{.About}}{{end}}: {{.Why}}
-{{if .Fix}}{{if $b.Draft}}<div class="muted">Fix once added: <code>{{.Fix}}</code></div>{{else}}<form method="post" action="{{$b.Base}}applyfix"><input type="hidden" name="name" value="{{$b.Name}}"><input type="hidden" name="finding" value="{{$i}}"><button>Apply the fix</button></form> <details><summary class="muted">what it changes</summary><pre>{{.Fix}}</pre></details>{{end}}{{end}}</li>{{end}}</ul>{{else}}{{if .Summary}}<div class="muted">No findings.</div>{{end}}{{end}}
-</div>{{end}}{{end}}
-{{define "body"}}
-<h1>Connectors</h1>
-<p class="sub">The systems members of your organization may connect. A connector names its hosts, how one connects and which requests read or change. Enabled ones are offered to members; their agents reach them as each member.</p>
-<div class="card"><strong>Connect a system</strong>
-<form class="block" method="post" action="{{.Base}}describe"><label for="describe">Say what to connect and what agents may do there, in your words; paste its API documentation if you have it. AI drafts the connector; you review and add it.</label>
-<textarea id="describe" name="description" style="min-height:90px;font-family:inherit" placeholder="Our issue tracker at issues.example.com: agents read issues and comments; filing or editing an issue asks first. People connect with a personal token from Profile → Tokens."></textarea>
-<label for="links">Its API documentation (optional): up to 3 https links; AI reads them</label>
-<input id="links" name="links" placeholder="https://docs.example.com/api/authentication">
-<p><button class="primary" data-busy="Drafting…">Draft it</button></p></form></div>
-{{range .Drafting}}<div class="card">{{if .Error}}<strong>No draft</strong> <span class="muted">for “{{.Description}}”</span><div class="muted">{{.Error}}</div>
-<form method="post" action="{{$.Base}}dismissdrafting"><input type="hidden" name="id" value="{{.ID}}"><button>Dismiss</button></form>{{else}}<div class="row"><div><span class="spin" aria-hidden="true"></span> <strong>AI is drafting</strong> <span class="muted">“{{.Description}}”</span><div class="muted">This page updates by itself; the draft appears below with its review.</div></div></div>{{end}}</div>{{end}}
-{{if .Drafts}}
-<h2>Drafts</h2>
-{{range .Drafts}}
-<div class="card"><div class="row"><div><strong>{{.Connector.DisplayName}}</strong> <span class="pill">draft</span><div class="muted">by {{.DraftedBy}} · {{range $i, $h := .Connector.Hosts}}{{if $i}}, {{end}}{{$h}}{{end}}</div>{{if .Notes}}<div class="muted">{{.Notes}}</div>{{end}}</div>
-<div><form method="post" action="{{$.Base}}draft"><input type="hidden" name="name" value="{{.Connector.Name}}"><button class="primary" name="decision" value="accept">Add (disabled)</button> <button name="decision" value="discard">Discard</button></form></div></div>
-{{template "review" .ReviewBlock}}
-<form method="post" action="{{$.Base}}review"><input type="hidden" name="name" value="{{.Connector.Name}}"><input type="hidden" name="draft" value="1"><button>Review again</button></form>
-<details><summary class="muted">JSON</summary><pre>{{.JSON}}</pre></details></div>
-{{end}}
-{{end}}
-<h2>Connectors</h2>
-{{if not .Connectors}}<div class="card">None yet. Add one below (samples: the bnbloc-connectors repository).</div>{{end}}
-{{range .Connectors}}
-<div class="card"><div class="row"><div><strong>{{.C.DisplayName}}</strong> {{if .C.Enabled}}<span class="pill ok">enabled</span>{{else}}<span class="pill">disabled</span>{{end}}
-<div class="muted">{{.C.Name}} · {{.C.Connect.Kind}} · {{range $i, $h := .C.Hosts}}{{if $i}}, {{end}}{{$h}}{{end}}</div>
-<div class="muted">Requests go out from: {{if .C.FromMember}}each member's computer{{else}}this service{{end}}</div>
-<div class="muted">Client secret: {{if .HasClientSecret}}set{{else}}not set{{end}} · Provider secret: {{if .HasProviderSecret}}set{{else}}not set{{end}}</div></div>
-<div><form method="post" action="{{$.Base}}toggle"><input type="hidden" name="name" value="{{.C.Name}}">{{if .C.Enabled}}<button name="enabled" value="0">Disable</button>{{else}}<button class="primary" name="enabled" value="1">{{if .Review.High}}Enable ({{.Review.High}} high finding{{if gt .Review.High 1}}s{{end}}){{else}}Enable{{end}}</button>{{end}}</form>
-<form method="post" action="{{$.Base}}sendfrom"><input type="hidden" name="name" value="{{.C.Name}}">{{if .C.FromMember}}<button name="sendFrom" value="server">Send from this service</button>{{else}}<button name="sendFrom" value="member">Send from members' computers</button>{{end}}</form>
-<form method="post" action="{{$.Base}}delete"><input type="hidden" name="name" value="{{.C.Name}}"><button class="danger">Remove</button></form></div></div>
-{{template "review" .ReviewBlock}}
-<form method="post" action="{{$.Base}}review"><input type="hidden" name="name" value="{{.C.Name}}"><button>Review again</button></form>
-{{if and .C.Test .C.Enabled}}<form method="post" action="{{$.Base}}try"><input type="hidden" name="name" value="{{.C.Name}}"><button data-busy="Trying…">Try it</button> <span class="muted">sends {{or .C.Test.Method "GET"}} {{.C.Test.Path}} with your own connection{{if .C.FromMember}}, from your computer{{end}}</span></form>{{if .Try}}<div class="muted">Last try: {{.Try}}</div>{{end}}{{end}}
-{{if or .Refused .Allowed .Proposal.Rules .Proposal.Pending .Proposal.Error}}<div class="ai"><div class="muted">From use: {{.Refused}} refused request{{if ne .Refused 1}}s{{end}} no rule classifies, {{.Allowed}} allowed change{{if ne .Allowed 1}}s{{end}}{{if .Proposal.Pending}} · suggesting rules…{{end}}</div>
-{{if .Proposal.Error}}<div class="muted">{{.Proposal.Error}}</div>{{end}}
-{{if .Proposal.Notes}}<div>{{.Proposal.Notes}}</div>{{end}}
-{{$name := .C.Name}}{{range .Proposal.Rules}}<div class="row"><div><strong>{{.Method}} {{.Path}}</strong> → {{if eq .Class "read"}}a read{{else}}a change{{end}} <span class="muted">({{.Matches}} seen)</span><div class="muted">{{.Why}}{{if eq .Class "read"}} Agents then call it without asking.{{end}}</div></div>
-<div><form method="post" action="{{$.Base}}addrule"><input type="hidden" name="name" value="{{$name}}"><input type="hidden" name="id" value="{{.ID}}"><button class="primary">Add</button></form>
-<form method="post" action="{{$.Base}}dismissrule"><input type="hidden" name="name" value="{{$name}}"><input type="hidden" name="id" value="{{.ID}}"><button>Dismiss</button></form></div></div>{{end}}
-{{if or .Refused .Allowed}}<form method="post" action="{{$.Base}}propose"><input type="hidden" name="name" value="{{.C.Name}}"><button>Suggest rules</button></form>{{end}}
+{{if or .Reads .Changes}}<div class="ai-cols">
+  {{if .Reads}}<div><div class="subtle">Reads without asking</div><ul>{{range .Reads}}<li>{{.}}</li>{{end}}</ul></div>{{end}}
+  {{if .Changes}}<div><div class="subtle">Changes, after the member allows them</div><ul>{{range .Changes}}<li>{{.}}</li>{{end}}</ul></div>{{end}}
 </div>{{end}}
-<details><summary class="muted">Edit</summary>
-<form class="block" method="post" action="{{$.Base}}save"><textarea name="json" spellcheck="false">{{.JSON}}</textarea><p><button>Save</button></p></form>
-<form class="block" method="post" action="{{$.Base}}secrets"><input type="hidden" name="name" value="{{.C.Name}}">
-<label>Client secret (OAuth; empty keeps the current one)</label><input type="password" name="clientSecret" autocomplete="off">
-<label>Provider secret (provider connectors; empty keeps the current one)</label><input type="password" name="providerSecret" autocomplete="off">
-<p><button>Save secrets</button></p></form></details></div>
+{{if .Findings}}<div class="subtle" style="margin-top:6px">Findings</div><ul>{{range $i, $f := .Findings}}<li><span class="sev sev-{{.Severity}}">{{.Severity}}</span>{{if .About}}<strong>{{.About}}</strong>: {{end}}{{.Why}}
+{{if .Fix}}{{if $b.Draft}}<div class="subtle">Fix once added: <code>{{.Fix}}</code></div>{{else}}<div style="margin-top:6px;display:flex;gap:10px;align-items:center;flex-wrap:wrap"><form method="post" action="{{$b.Base}}applyfix"><input type="hidden" name="name" value="{{$b.Name}}"><input type="hidden" name="finding" value="{{$i}}"><button class="sm" data-busy="Applying…">Apply the fix</button></form> <details class="more"><summary>What it changes</summary><div class="more-body"><pre>{{.Fix}}</pre></div></details></div>{{end}}{{end}}</li>{{end}}</ul>{{else}}{{if .Summary}}<div class="subtle" style="margin-top:6px">No findings.</div>{{end}}{{end}}
+</div>{{end}}{{end}}
+
+{{define "kind"}}{{if eq . "apiKey"}}API key{{else if eq . "oauth2"}}OAuth{{else if eq . "provider"}}Sign-in provider{{else}}{{.}}{{end}}{{end}}
+
+{{define "body"}}
+<div class="head">
+  <div>
+    <p class="eyebrow">Connections · for admins</p>
+    <h1>Connectors</h1>
+    <p class="sub">The systems members of your organization may connect. A connector names its hosts, how one connects and which requests read or change. Enabled ones are offered to members; their agents reach them as each member.</p>
+  </div>
+  {{if .Connectors}}<div class="stats"><div class="stat"><b>{{.NEnabled}}<span> / {{len .Connectors}}</span></b><span>enabled</span></div></div>{{end}}
+</div>
+
+<div class="card pad">
+  <div class="item-title"><strong>Add a system</strong><span class="status accent">AI drafts it</span></div>
+  <p class="muted" style="margin:4px 0 0">Say what to connect and what agents may do there, in your words. AI drafts the connector and reviews it; you check it and add it.</p>
+  <form class="block" method="post" action="{{.Base}}describe">
+    <label for="describe">What to connect</label>
+    <textarea id="describe" class="prose" name="description" placeholder="Our issue tracker at issues.example.com: agents read issues and comments; filing or editing an issue asks first. People connect with a personal token from Profile → Tokens."></textarea>
+    <label for="links">API documentation <span class="subtle">(optional, up to 3 https links; AI reads them)</span></label>
+    <input id="links" name="links" placeholder="https://docs.example.com/api/authentication">
+    <div class="form-actions"><button class="primary" data-busy="Drafting…">Draft it</button><button type="button" class="ghost" data-reveal="paste-json" aria-expanded="false">Paste a connector's JSON instead</button></div>
+  </form>
+  <form id="paste-json" class="block reveal" method="post" action="{{.Base}}save" hidden>
+    <label for="paste">Connector JSON</label>
+    <textarea id="paste" name="json" spellcheck="false" placeholder='{"name": "…", "displayName": "…", "hosts": ["…"], "connect": {…}, "policy": {…}}'></textarea>
+    <div class="form-actions"><button class="primary" data-busy="Adding…">Add</button><span class="subtle">Added disabled; enable it after its review.</span></div>
+  </form>
+</div>
+
+{{range .Drafting}}
+<div class="card item" style="margin-top:10px">{{if .Error}}
+  <div class="item-top"><div class="item-main"><div class="item-title"><strong>No draft</strong><span class="status bad">failed</span></div>
+    <div class="muted">“{{.Description}}”</div><div class="callout bad"><div class="grow">{{.Error}}</div></div></div>
+    <div class="item-actions"><form method="post" action="{{$.Base}}dismissdrafting"><input type="hidden" name="id" value="{{.ID}}"><button class="sm">Dismiss</button></form></div></div>
+{{else}}
+  <div class="item-top"><span class="spin" aria-hidden="true"></span><div class="item-main"><strong>AI is drafting</strong> <span class="muted">“{{.Description}}”</span>
+    <div class="subtle">This page updates by itself; the draft appears below with its review.</div></div></div>
+{{end}}</div>
 {{end}}
-<h2>Or paste a connector's JSON</h2>
-<form class="block" method="post" action="{{.Base}}save"><textarea name="json" spellcheck="false" placeholder='{"name": "…", "displayName": "…", "hosts": ["…"], "connect": {…}, "policy": {…}}'></textarea><p><button class="primary">Add</button></p></form>
+
+{{if .Drafts}}
+<section>
+  <div class="sec"><h2>Drafts <span class="n">{{len .Drafts}}</span></h2></div>
+  <div class="list">
+  {{range .Drafts}}
+  <div class="card item">
+    <div class="item-top">
+      <div class="mono-av" data-mono="{{.Connector.DisplayName}}" aria-hidden="true"></div>
+      <div class="item-main">
+        <div class="item-title"><strong>{{.Connector.DisplayName}}</strong><span class="status warn">Draft</span></div>
+        <div class="meta"><span class="chip">by {{.DraftedBy}}</span><span class="chip">{{template "kind" .Connector.Connect.Kind}}</span>{{range .Connector.Hosts}}<span class="chip mono">{{.}}</span>{{end}}</div>
+        {{if .Notes}}<div class="muted" style="margin-top:8px">{{.Notes}}</div>{{end}}
+      </div>
+      <div class="item-actions"><form method="post" action="{{$.Base}}draft"><input type="hidden" name="name" value="{{.Connector.Name}}"><button class="primary" name="decision" value="accept" data-busy="Adding…">Add (disabled)</button> <button class="ghost" name="decision" value="discard" data-busy="Discarding…">Discard</button></form></div>
+    </div>
+    {{template "review" .ReviewBlock}}
+    <div class="item-foot">
+      <form method="post" action="{{$.Base}}review"><input type="hidden" name="name" value="{{.Connector.Name}}"><input type="hidden" name="draft" value="1"><button class="sm" data-busy="Reviewing…">Review again</button></form>
+      <details class="more" style="flex-basis:100%"><summary>JSON</summary><div class="more-body"><pre>{{.JSON}}</pre></div></details>
+    </div>
+  </div>
+  {{end}}
+  </div>
+</section>
+{{end}}
+
+<section>
+  <div class="sec"><h2>Connectors {{if .Connectors}}<span class="n">{{len .Connectors}}</span>{{end}}</h2>
+    {{if gt (len .Connectors) 5}}<div class="search"><input type="search" placeholder="Find a connector" data-filter aria-label="Find a connector"></div>{{end}}</div>
+  {{if not .Connectors}}<div class="card empty"><strong>No connectors yet</strong>Describe a system above, or paste a connector's JSON (samples: the bnbloc-connectors repository).</div>{{end}}
+  <div class="list">
+  {{range .Connectors}}
+  <div class="card item" id="{{.C.Name}}" data-search="{{.C.DisplayName}} {{.C.Name}}{{range .C.Hosts}} {{.}}{{end}}">
+    <div class="item-top">
+      <div class="mono-av" data-mono="{{.C.DisplayName}}" aria-hidden="true"></div>
+      <div class="item-main">
+        <div class="item-title"><strong>{{.C.DisplayName}}</strong>{{if .C.Enabled}}<span class="status ok">Enabled</span>{{else}}<span class="status">Disabled</span>{{end}}{{if .Review.High}}<span class="status bad">{{.Review.High}} high finding{{if gt .Review.High 1}}s{{end}}</span>{{end}}</div>
+        {{if .C.Purpose}}<div class="item-desc">{{.C.Purpose}}</div>{{end}}
+        <div class="meta">
+          <span class="chip mono">{{.C.Name}}</span>
+          <span class="chip">{{template "kind" .C.Connect.Kind}}</span>
+          {{range .C.Hosts}}<span class="chip mono">{{.}}</span>{{end}}
+          <span class="chip">sends from {{if .C.FromMember}}members' computers{{else}}this service{{end}}</span>
+          {{if eq .C.Connect.Kind "oauth2"}}<span class="chip">client secret {{if .HasClientSecret}}set{{else}}not set{{end}}</span>{{end}}
+          {{if eq .C.Connect.Kind "provider"}}<span class="chip">provider secret {{if .HasProviderSecret}}set{{else}}not set{{end}}</span>{{end}}
+        </div>
+      </div>
+      <div class="item-actions"><form method="post" action="{{$.Base}}toggle"><input type="hidden" name="name" value="{{.C.Name}}">{{if .C.Enabled}}<button name="enabled" value="0" data-busy="Disabling…">Disable</button>{{else}}<button class="primary" name="enabled" value="1" data-busy="Enabling…">{{if .Review.High}}Enable ({{.Review.High}} high finding{{if gt .Review.High 1}}s{{end}}){{else}}Enable{{end}}</button>{{end}}</form></div>
+    </div>
+
+    {{template "review" .ReviewBlock}}
+
+    {{if and .C.Test .C.Enabled}}
+    <div class="callout{{if .Try}} ok{{end}}"><div class="grow">
+      <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap"><form method="post" action="{{$.Base}}try"><input type="hidden" name="name" value="{{.C.Name}}"><button class="sm" data-busy="Trying…">Try it</button></form>
+      <span class="muted">sends <span class="method {{or .C.Test.Method "GET"}}">{{or .C.Test.Method "GET"}}</span><span class="path">{{.C.Test.Path}}</span> with your own connection{{if .C.FromMember}}, from your computer{{end}}</span></div>
+      {{if .Try}}<div class="subtle" style="margin-top:6px">Last try: {{.Try}}</div>{{end}}
+    </div></div>
+    {{end}}
+
+    {{if or .Refused .Allowed .Proposal.Rules .Proposal.Pending .Proposal.Error}}
+    <div class="ai"><div class="ai-head">From use</div>
+      <div class="muted">{{.Refused}} refused request{{if ne .Refused 1}}s{{end}} no rule classifies, {{.Allowed}} allowed change{{if ne .Allowed 1}}s{{end}}{{if .Proposal.Pending}} · <span class="spin" aria-hidden="true"></span> suggesting rules…{{end}}</div>
+      {{if .Proposal.Error}}<div class="muted">{{.Proposal.Error}}</div>{{end}}
+      {{if .Proposal.Notes}}<div style="margin-top:6px">{{.Proposal.Notes}}</div>{{end}}
+      {{$name := .C.Name}}{{range .Proposal.Rules}}<div class="rule"><div><span class="method {{.Method}}">{{.Method}}</span><span class="path">{{.Path}}</span> → <strong>{{if eq .Class "read"}}a read{{else}}a change{{end}}</strong> <span class="subtle">({{.Matches}} seen)</span><div class="muted">{{.Why}}{{if eq .Class "read"}} Agents then call it without asking.{{end}}</div></div>
+        <div class="item-actions"><form method="post" action="{{$.Base}}addrule"><input type="hidden" name="name" value="{{$name}}"><input type="hidden" name="id" value="{{.ID}}"><button class="primary sm">Add</button></form>
+        <form method="post" action="{{$.Base}}dismissrule"><input type="hidden" name="name" value="{{$name}}"><input type="hidden" name="id" value="{{.ID}}"><button class="ghost sm">Dismiss</button></form></div></div>{{end}}
+      {{if or .Refused .Allowed}}<div style="margin-top:10px"><form method="post" action="{{$.Base}}propose"><input type="hidden" name="name" value="{{.C.Name}}"><button class="sm" data-busy="Suggesting…">Suggest rules</button></form></div>{{end}}
+    </div>
+    {{end}}
+
+    <div class="item-foot">
+      <form method="post" action="{{$.Base}}review"><input type="hidden" name="name" value="{{.C.Name}}"><button class="sm" data-busy="Reviewing…">Review again</button></form>
+      <form method="post" action="{{$.Base}}sendfrom"><input type="hidden" name="name" value="{{.C.Name}}">{{if .C.FromMember}}<button class="sm ghost" name="sendFrom" value="server">Send from this service</button>{{else}}<button class="sm ghost" name="sendFrom" value="member">Send from members' computers</button>{{end}}</form>
+      <button type="button" class="sm ghost" data-reveal="edit-{{.C.Name}}" aria-expanded="false">Edit</button>
+      <form method="post" action="{{$.Base}}delete" style="margin-left:auto" data-confirm="Remove {{.C.DisplayName}}? Members lose their connections to it."><input type="hidden" name="name" value="{{.C.Name}}"><button class="sm ghost danger" data-busy="Removing…">Remove</button></form>
+    </div>
+    <div id="edit-{{.C.Name}}" class="reveal" hidden>
+      <form class="block" method="post" action="{{$.Base}}save"><label>Connector JSON</label><textarea name="json" spellcheck="false">{{.JSON}}</textarea><div class="form-actions"><button class="primary" data-busy="Saving…">Save</button></div></form>
+      {{if or (eq .C.Connect.Kind "oauth2") (eq .C.Connect.Kind "provider")}}
+      <form class="block" method="post" action="{{$.Base}}secrets"><input type="hidden" name="name" value="{{.C.Name}}">
+        <div class="form-grid">
+          {{if eq .C.Connect.Kind "oauth2"}}<div class="wide"><label>Client secret <span class="subtle">(empty keeps the current one)</span></label><input type="password" name="clientSecret" autocomplete="off"></div>{{end}}
+          {{if eq .C.Connect.Kind "provider"}}<div class="wide"><label>Provider secret <span class="subtle">(empty keeps the current one)</span></label><input type="password" name="providerSecret" autocomplete="off"></div>{{end}}
+        </div>
+        <div class="form-actions"><button data-busy="Saving…">Save the secret</button></div></form>
+      {{end}}
+    </div>
+  </div>
+  {{end}}
+  </div>
+</section>
 {{end}}

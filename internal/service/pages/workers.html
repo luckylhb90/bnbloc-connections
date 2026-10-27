@@ -1,39 +1,90 @@
+{{define "drive"}}{{if eq . "own"}}the member's own{{else if eq . "platform"}}platform agents{{else if eq . "borrowed"}}borrowed agents{{else}}{{.}}{{end}}{{end}}
+
 {{define "body"}}
-<h1>Digital workers</h1>
-<p class="sub">Accounts of your organization that are not a person. An agent acts as one where its audience allows: for members who are not connected to a system, and for borrowed or platform agents, which never act as a person. The system sees the worker; every call names who asked.</p>
-{{if not .Workers}}<div class="card">{{if .Admin}}None yet. Add one below.{{else}}No digital worker serves your agents.{{end}}</div>{{end}}
-{{range .Workers}}{{$w := .}}
-<div class="card"><div class="row"><div><strong>{{.W.DisplayName}}</strong> <span class="muted">{{.W.ID}} · {{.W.Account}}</span>
-{{if .W.Purpose}}<div class="muted">{{.W.Purpose}}</div>{{end}}
-<div class="muted">Owners: {{if .Owners}}{{.Owners}}{{else}}none{{end}} · Members: {{if .Members}}{{.Members}}{{else}}none{{end}} · Agents: {{range $i, $d := .W.Drives}}{{if $i}}, {{end}}{{$d}}{{else}}none{{end}}</div></div>
-{{if $.Admin}}<div><form method="post" action="{{$.Base}}remove"><input type="hidden" name="id" value="{{.W.ID}}"><button class="danger">Remove</button></form></div>{{end}}</div>
-<table><tr><th>System</th><th>Connected</th><th>Changes</th>{{if .Manage}}<th></th>{{end}}</tr>
-{{range .Systems}}<tr><td>{{.C.DisplayName}}</td><td>{{if .Connected}}yes{{else}}no{{end}}</td><td>{{if .Connected}}{{if .Changes}}without asking{{else}}ask the person who asked{{end}}{{else}}-{{end}}</td>
-{{if $w.Manage}}<td>{{if .Connected}}
-<form method="post" action="{{$.Base}}reach"><input type="hidden" name="id" value="{{$w.W.ID}}"><input type="hidden" name="system" value="{{.C.Name}}">{{if .Changes}}<button name="reach" value="read">Ask for changes</button>{{else}}<button name="reach" value="write">Allow changes</button>{{end}}</form>
-<form method="post" action="{{$.Base}}disconnect"><input type="hidden" name="id" value="{{$w.W.ID}}"><input type="hidden" name="system" value="{{.C.Name}}"><button class="danger">Disconnect</button></form>
-{{else if .Supported}}<form method="post" action="{{$.Base}}connect"><input type="hidden" name="id" value="{{$w.W.ID}}"><input type="hidden" name="system" value="{{.C.Name}}"><button class="primary">Connect</button></form>
-{{else}}<span class="muted">not through a provider</span>{{end}}</td>{{end}}</tr>{{end}}
-</table>
-{{if .Calls}}<details><summary class="muted">Recent calls</summary><table><tr><th>When (UTC)</th><th>Asked by</th><th>System</th><th>Request</th><th>Result</th></tr>
-{{range .Calls}}<tr><td>{{.When}}</td><td>{{.Member}}</td><td>{{.Connector}}</td><td>{{.Method}} {{.Path}}</td><td>{{if .Status}}{{.Status}} {{end}}{{.Outcome}}</td></tr>{{end}}</table></details>{{end}}
-{{if $.Admin}}<details><summary class="muted">Edit</summary>{{template "workerform" .}}</details>{{end}}
+<div class="head">
+  <div>
+    <p class="eyebrow">Connections</p>
+    <h1>Digital workers</h1>
+    <p class="sub">Accounts of your organization that are not a person. An agent acts as one where its audience allows: for members who are not connected to a system, and for borrowed or platform agents, which never act as a person. The system sees the worker; every call names who asked.</p>
+  </div>
+  {{if and .Admin .Workers}}<button type="button" class="primary" data-reveal="add-worker" aria-expanded="false">Add a digital worker</button>{{end}}
+</div>
+
+{{if .Admin}}
+<div id="add-worker" class="card pad"{{if .Workers}} hidden{{end}} style="margin-bottom:10px">
+  <div class="item-title"><strong>Add a digital worker</strong></div>
+  <p class="muted" style="margin:4px 0 0">An account the sign-in providers know (a bot or a service account), and who may use it.</p>
+  {{template "workerform" .Blank}}
 </div>
 {{end}}
-{{if .Admin}}
-<h2>Add a digital worker</h2>
-<div class="card">{{template "workerform" .Blank}}</div>
+
+{{if not .Workers}}{{if not .Admin}}<div class="card empty"><strong>No digital worker serves your agents</strong>An administrator adds them; their owners connect them to systems.</div>{{end}}
+{{else}}
+<div class="list">
+{{range .Workers}}{{$w := .}}
+<div class="card item" id="w-{{.W.ID}}">
+  <div class="item-top">
+    <div class="mono-av" data-mono="{{.W.DisplayName}}" aria-hidden="true"></div>
+    <div class="item-main">
+      <div class="item-title"><strong>{{.W.DisplayName}}</strong>{{if .ServesMe}}<span class="status accent">Serves your agents</span>{{end}}</div>
+      {{if .W.Purpose}}<div class="item-desc">{{.W.Purpose}}</div>{{end}}
+      <div class="meta"><span class="chip mono">{{.W.ID}}</span><span class="chip mono">{{.W.Account}}</span></div>
+    </div>
+    {{if $.Admin}}<div class="item-actions">
+      <button type="button" class="sm ghost" data-reveal="edit-{{.W.ID}}" aria-expanded="false">Edit</button>
+      <form method="post" action="{{$.Base}}remove" data-confirm="Remove {{.W.DisplayName}}? Agents stop acting as it, and its connections end."><input type="hidden" name="id" value="{{.W.ID}}"><button class="sm ghost danger" data-busy="Removing…">Remove</button></form>
+    </div>{{end}}
+  </div>
+
+  <div class="form-grid" style="margin:14px 0 0 54px;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px 16px">
+    <div><div class="subtle">Owners</div><div>{{if .Owners}}{{.Owners}}{{else}}<span class="subtle">none</span>{{end}}</div></div>
+    <div><div class="subtle">Members it acts for</div><div>{{if eq .Members "*"}}everyone{{else if .Members}}{{.Members}}{{else}}<span class="subtle">none</span>{{end}}</div></div>
+    <div><div class="subtle">Agents that may act as it</div><div>{{range $i, $d := .W.Drives}}{{if $i}}, {{end}}{{template "drive" $d}}{{else}}<span class="subtle">none</span>{{end}}</div></div>
+  </div>
+
+  {{if .Systems}}
+  <div class="card table-wrap" style="margin-top:16px;box-shadow:none">
+    <table>
+      <tr><th>System</th><th>Status</th><th>Changes</th>{{if .Manage}}<th></th>{{end}}</tr>
+      {{range .Systems}}<tr>
+        <td><strong>{{.C.DisplayName}}</strong></td>
+        <td>{{if .Connected}}<span class="status ok">Connected</span>{{else}}<span class="status">Not connected</span>{{end}}</td>
+        <td class="muted">{{if .Connected}}{{if .Changes}}made without asking{{else}}asks the person who asked{{end}}{{else}}–{{end}}</td>
+        {{if $w.Manage}}<td style="text-align:right;white-space:nowrap">{{if .Connected}}
+          <form method="post" action="{{$.Base}}reach"><input type="hidden" name="id" value="{{$w.W.ID}}"><input type="hidden" name="system" value="{{.C.Name}}">{{if .Changes}}<button class="sm" name="reach" value="read">Ask for changes</button>{{else}}<button class="sm" name="reach" value="write">Allow changes</button>{{end}}</form>
+          <form method="post" action="{{$.Base}}disconnect" data-confirm="Disconnect {{$w.W.DisplayName}} from {{.C.DisplayName}}?"><input type="hidden" name="id" value="{{$w.W.ID}}"><input type="hidden" name="system" value="{{.C.Name}}"><button class="sm ghost danger">Disconnect</button></form>
+        {{else if .Supported}}<form method="post" action="{{$.Base}}connect"><input type="hidden" name="id" value="{{$w.W.ID}}"><input type="hidden" name="system" value="{{.C.Name}}"><button class="sm primary" data-busy="Connecting…">Connect</button></form>
+        {{else}}<span class="subtle">not through a provider</span>{{end}}</td>{{end}}
+      </tr>{{end}}
+    </table>
+  </div>
+  {{end}}
+
+  {{if .Calls}}<details class="more" style="margin-top:14px"><summary>Recent calls ({{len .Calls}})</summary><div class="more-body card table-wrap" style="box-shadow:none"><table>
+    <tr><th>When (UTC)</th><th>Asked by</th><th>System</th><th>Request</th><th>Result</th></tr>
+    {{range .Calls}}<tr><td class="num">{{.When}}</td><td>{{.Member}}</td><td>{{.Connector}}</td><td><span class="method {{.Method}}">{{.Method}}</span><span class="path">{{.Path}}</span></td><td class="out out-{{.Outcome}}">{{if .Status}}{{.Status}} {{end}}{{.Outcome}}</td></tr>{{end}}
+  </table></div></details>{{end}}
+
+  {{if $.Admin}}<div id="edit-{{.W.ID}}" class="reveal" hidden>{{template "workerform" .}}</div>{{end}}
+</div>
+{{end}}
+</div>
 {{end}}
 {{end}}
+
 {{define "workerform"}}<form class="block" method="post" action="{{.Base}}save">
-<label>Id</label><input type="text" name="id" value="{{.W.ID}}" required>
-<label>Name</label><input type="text" name="displayName" value="{{.W.DisplayName}}" required>
-<label>Purpose</label><input type="text" name="purpose" value="{{.W.Purpose}}">
-<label>Account (its name in the directory the providers sign in with)</label><input type="text" name="account" value="{{.W.Account}}" required>
-<label>Owners (member ids, comma-separated)</label><input type="text" name="owners" value="{{.Owners}}">
-<label>Members whose agents may act as it (member ids, or * for everyone)</label><input type="text" name="members" value="{{.Members}}">
-<label>Agents that may act as it</label>
-<label><input type="checkbox" name="drive" value="own"{{if .Drive.own}} checked{{end}}> the member's own</label>
-<label><input type="checkbox" name="drive" value="platform"{{if .Drive.platform}} checked{{end}}> the organization's platform agents</label>
-<label><input type="checkbox" name="drive" value="borrowed"{{if .Drive.borrowed}} checked{{end}}> an agent borrowed from a colleague</label>
-<p><button class="primary">Save</button></p></form>{{end}}
+<div class="form-grid">
+  <div><label>Name</label><input type="text" name="displayName" value="{{.W.DisplayName}}" placeholder="Release bot" required></div>
+  <div><label>Id <span class="subtle">(never changes)</span></label><input type="text" name="id" value="{{.W.ID}}" placeholder="release-bot" required{{if .W.ID}} readonly{{end}}></div>
+  <div class="wide"><label>Purpose</label><input type="text" name="purpose" value="{{.W.Purpose}}" placeholder="What it is for, in a line"></div>
+  <div class="wide"><label>Account <span class="subtle">(its name in the directory the sign-in providers use)</span></label><input type="text" name="account" value="{{.W.Account}}" required></div>
+  <div><label>Owners <span class="subtle">(member ids, comma-separated)</span></label><input type="text" name="owners" value="{{.Owners}}"></div>
+  <div><label>Members whose agents may act as it <span class="subtle">(ids, or * for everyone)</span></label><input type="text" name="members" value="{{.Members}}"></div>
+  <div class="wide"><label>Agents that may act as it</label>
+    <div style="display:flex;gap:18px;flex-wrap:wrap">
+      <label class="inline"><input type="checkbox" name="drive" value="own"{{if .Drive.own}} checked{{end}}> the member's own</label>
+      <label class="inline"><input type="checkbox" name="drive" value="platform"{{if .Drive.platform}} checked{{end}}> the organization's platform agents</label>
+      <label class="inline"><input type="checkbox" name="drive" value="borrowed"{{if .Drive.borrowed}} checked{{end}}> an agent borrowed from a colleague</label>
+    </div></div>
+</div>
+<div class="form-actions"><button class="primary" data-busy="Saving…">Save</button></div></form>{{end}}

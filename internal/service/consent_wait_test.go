@@ -59,7 +59,7 @@ func TestConsentInTheBrowser(t *testing.T) {
 		t.Fatalf("connect = %d %s (notify %v), want the consent page", rec.Code, rec.Header().Get("Location"), last().Notify)
 	}
 	body := fx.page(false, http.MethodGet, "/pages/connections", nil).Body.String()
-	if !strings.Contains(body, "waiting for your authorization") || !strings.Contains(body, `<meta name="live" content="issues:consent">`) || !strings.Contains(body, "Send it to me in chat again") {
+	if !strings.Contains(body, "Waiting for your authorization") || !strings.Contains(body, `<meta name="live" content="issues:consent">`) || !strings.Contains(body, "Send it to me in chat again") {
 		t.Fatalf("the waiting row:\n%s", body)
 	}
 	if c := last(); !c.Check || grant() != nil {
@@ -75,7 +75,7 @@ func TestConsentInTheBrowser(t *testing.T) {
 	if live := fx.page(false, http.MethodGet, "/pages/connections?live=issues:consent", nil).Body.String(); !strings.Contains(live, `if ("" !== "issues:consent")`) || grant() == nil {
 		t.Fatalf("the follower after the consent:\n%s", live)
 	}
-	if body := fx.page(false, http.MethodGet, "/pages/connections", nil).Body.String(); strings.Contains(body, "waiting for your authorization") || grant() == nil {
+	if body := fx.page(false, http.MethodGet, "/pages/connections", nil).Body.String(); strings.Contains(body, "Waiting for your authorization") || grant() == nil {
 		t.Fatalf("the consent did not complete the connection on the page")
 	}
 
