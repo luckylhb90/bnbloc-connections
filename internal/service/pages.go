@@ -108,6 +108,14 @@ type systemRow struct {
 	Chosen  string
 	// Check is the last check of the member's connection ("": none).
 	Check string
+	// Options are a connected provider connector's member options, as set.
+	Options []optionRow
+}
+
+// optionRow is one member option of a connection, on or off.
+type optionRow struct {
+	Key, Label string
+	On         bool
 }
 
 type activityRow struct {
@@ -142,6 +150,9 @@ func (s *Service) connectionsPage(w http.ResponseWriter, r *http.Request, m comp
 		return
 	case "reach":
 		s.setReach(w, ctx, m, form.Get("system"), form.Get("reach"))
+		return
+	case "option":
+		s.setOption(w, ctx, m, form.Get("system"), form.Get("key"), form.Get("value"))
 		return
 	case "actas", "roomidentity", "myidentity":
 		// Who agents act as: everywhere (actas), for everyone in this room
@@ -196,6 +207,13 @@ func (s *Service) connectionsPage(w http.ResponseWriter, r *http.Request, m comp
 			row.Help, row.Signs, row.Extra = c.Connect.APIKey.Help, c.Connect.APIKey.Sign != nil, c.Connect.APIKey.Extra
 		case c.Connect.Provider != nil:
 			row.Help = c.Connect.Provider.Help
+			if v.Connected {
+				g, _, _ := s.grant(ctx, m.Subject, m.Org, c.Name)
+				vals := c.Connect.Provider.OptionValues(g.Options)
+				for _, o := range c.Connect.Provider.Options {
+					row.Options = append(row.Options, optionRow{Key: o.Key, Label: o.Label, On: vals[o.Key] == "true"})
+				}
+			}
 		}
 		rows = append(rows, row)
 	}
@@ -344,7 +362,7 @@ func (s *Service) disconnect(w http.ResponseWriter, ctx context.Context, m compo
 		case connector.KindOAuth2:
 			s.revoke(ctx, c, m.Org, g)
 		case connector.KindProvider:
-			_, _ = s.callProvider(ctx, c, m.Org, provider.RevokePath, provider.Call{Member: m.Subject, Org: m.Org, Grant: g.ProviderGrant})
+			_, _ = s.callProvider(ctx, c, m.Org, provider.RevokePath, provider.Call{Member: m.Subject, Org: m.Org, Grant: g.ProviderGrant, Options: g.Options})
 		}
 	}
 	if err := s.deleteGrant(ctx, m.Subject, m.Org, name); err != nil {
@@ -354,6 +372,31 @@ func (s *Service) disconnect(w http.ResponseWriter, ctx context.Context, m compo
 	s.dropWaiting(ctx, m.Subject, m.Org, name)
 	audit(w, component.Audit{Action: "disconnect", Target: name, Outcome: "ok"})
 	back(w, m, "Disconnected.", false)
+}
+
+// setOption sets one of the member's options on their connection to a
+// provider connector; the provider gets it with its next call.
+func (s *Service) setOption(w http.ResponseWriter, ctx context.Context, m component.Member, name, key, value string) {
+	g, ok, err := s.grant(ctx, m.Subject, m.Org, name)
+	if err != nil || !ok {
+		back(w, m, "That system is not connected.", true)
+		return
+	}
+	c, found := s.connectorNamed(ctx, m.Org, name)
+	if !found || c.Connect.Provider == nil || !slices.ContainsFunc(c.Connect.Provider.Options, func(o connector.ProviderOption) bool { return o.Key == key }) {
+		back(w, m, "That option does not exist.", true)
+		return
+	}
+	if g.Options == nil {
+		g.Options = map[string]string{}
+	}
+	g.Options[key] = strconv.FormatBool(value == "true")
+	if err := s.saveGrant(ctx, m.Subject, m.Org, g); err != nil {
+		back(w, m, "Not saved: "+err.Error(), true)
+		return
+	}
+	audit(w, component.Audit{Action: "option", Target: name, Outcome: "ok", Detail: key + "=" + g.Options[key]})
+	back(w, m, c.DisplayName+": saved.", false)
 }
 
 func (s *Service) setReach(w http.ResponseWriter, ctx context.Context, m component.Member, name, reach string) {

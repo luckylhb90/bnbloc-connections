@@ -24,10 +24,12 @@ type providerError struct {
 
 func (e *providerError) Error() string { return e.msg }
 
-// callProvider sends one signed call to the connector's provider.
+// callProvider sends one signed call to the connector's provider; the
+// member's options (call.Options, from their grant) go with every declared
+// option's default filled in.
 func (s *Service) callProvider(ctx context.Context, c connector.Connector, org, path string, call provider.Call) (provider.Answer, error) {
 	p := c.Connect.Provider
-	call.App, call.Params = p.App, p.Params
+	call.App, call.Params, call.Options = p.App, p.Params, p.OptionValues(call.Options)
 	body, _ := json.Marshal(call)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, strings.TrimRight(p.URL, "/")+path, bytes.NewReader(body))
 	if err != nil {
@@ -59,7 +61,7 @@ func (s *Service) providerClient() *http.Client {
 
 // providerAuth is what the provider says one request carries.
 func (s *Service) providerAuth(ctx context.Context, c connector.Connector, org string, p principal, g *Grant, force bool) (cachedAuth, error) {
-	a, err := s.callProvider(ctx, c, org, provider.AuthorizePath, provider.Call{Member: p.Member, Principal: p.forProvider(), Org: org, Grant: g.ProviderGrant, Reach: g.Reach, Force: force})
+	a, err := s.callProvider(ctx, c, org, provider.AuthorizePath, provider.Call{Member: p.Member, Principal: p.forProvider(), Org: org, Grant: g.ProviderGrant, Reach: g.Reach, Force: force, Options: g.Options})
 	if err != nil {
 		return cachedAuth{}, err
 	}

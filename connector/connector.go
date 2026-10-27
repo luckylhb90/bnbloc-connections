@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"unicode/utf8"
 
@@ -230,6 +231,40 @@ type Provider struct {
 	// Params are the provider's per-system values (how the system takes
 	// what the provider obtains), passed on every call.
 	Params map[string]string `json:"params,omitempty"`
+	// Options are choices each member makes on their own connection (on or
+	// off), passed on every call as the member set them
+	// (provider.Call.Options).
+	Options []ProviderOption `json:"options,omitempty"`
+}
+
+// ProviderOption is one choice a member makes on their connection to a
+// provider connector: on or off, Default before they choose.
+type ProviderOption struct {
+	Key     string `json:"key"`
+	Label   string `json:"label"`
+	Default bool   `json:"default,omitempty"`
+}
+
+// MaxProviderOptions bounds a connector's member options.
+const MaxProviderOptions = 8
+
+var optionKey = regexp.MustCompile(`^[a-z][a-zA-Z0-9]{0,31}$`)
+
+// OptionValues are a member's options: each declared option as they set
+// it ("true" or "false"), else its default. Undeclared keys are dropped.
+func (p *Provider) OptionValues(chosen map[string]string) map[string]string {
+	if p == nil || len(p.Options) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(p.Options))
+	for _, o := range p.Options {
+		v, ok := chosen[o.Key]
+		if !ok || (v != "true" && v != "false") {
+			v = strconv.FormatBool(o.Default)
+		}
+		out[o.Key] = v
+	}
+	return out
 }
 
 // Policy sorts a request into read or write; anything matching neither is
@@ -453,6 +488,16 @@ func (c Connect) validate() error {
 		u, err := url.Parse(p.URL)
 		if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
 			return errors.New("provider.url: an http(s) URL")
+		}
+		if len(p.Options) > MaxProviderOptions {
+			return fmt.Errorf("provider.options: at most %d", MaxProviderOptions)
+		}
+		seen := map[string]bool{}
+		for _, o := range p.Options {
+			if !optionKey.MatchString(o.Key) || seen[o.Key] || strings.TrimSpace(o.Label) == "" || len(o.Label) > 120 {
+				return fmt.Errorf("provider.options: %q: a unique key (a letter, then letters and digits) and a label", o.Key)
+			}
+			seen[o.Key] = true
 		}
 	default:
 		return errors.New(`kind: "oauth2", "apiKey" or "provider"`)

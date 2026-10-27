@@ -53,6 +53,9 @@ type Call struct {
 	Force bool `json:"force,omitempty"`
 	// Params are the connector's per-system values for the provider.
 	Params map[string]string `json:"params,omitempty"`
+	// Options are the member's choices on this connection, every option
+	// the connector declares ("true" or "false"; connector.ProviderOption).
+	Options map[string]string `json:"options,omitempty"`
 }
 
 // Principal is who a call signs in as: a member (Kind PrincipalMember, ID

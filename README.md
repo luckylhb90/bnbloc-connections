@@ -115,7 +115,11 @@ and reviews the drafts agents post there.
     computer, the bridge gets the exact signed query and body
     (`Send.RawQuery`, `ReplaceBody`).
   - `provider`: another component speaks the protocol (`url`, `app`); see
-    below. Its secret is set on the admin page.
+    below. Its secret is set on the admin page. `options`
+    (`[{key, label, default}]`, at most 8) are on/off choices each member
+    makes on their own connection (e.g. renew a token automatically): the
+    Connections row shows them, and every provider call carries the
+    member's values with the defaults filled in (`provider.Call.Options`).
 - `policy`: read rules first (a POST search can be a read, with a `body`
   regular expression), then write rules; anything else is refused. A path
   glob has `*` (one segment) and `**` (any).

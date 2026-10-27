@@ -30,6 +30,7 @@
       <div class="muted">{{range $i, $h := .Hosts}}{{if $i}}, {{end}}{{$h}}{{end}}</div>
       {{if .Check}}<div class="muted">Checked: {{.Check}}</div>{{end}}
       {{if .Connected}}<div class="muted">{{if .As}}As {{.As}} (a digital worker) · {{end}}Changes: {{if eq .Changes "allowed"}}made without asking{{else}}each one asks you first{{end}}</div>{{end}}
+      {{$sys := .Name}}{{range .Options}}<form method="post" action="{{$.Base}}option"><input type="hidden" name="system" value="{{$sys}}"><input type="hidden" name="key" value="{{.Key}}"><input type="hidden" name="value" value="{{if .On}}false{{else}}true{{end}}"><span class="muted">{{.Label}}: {{if .On}}on{{else}}off{{end}}</span> <button>{{if .On}}Turn off{{else}}Turn on{{end}}</button></form>{{end}}
       {{if .Workers}}{{$sys := .}}<form method="post" action="{{$.Base}}actas"><input type="hidden" name="system" value="{{.Name}}"><label>Your agents act as
         <select name="worker"><option value="">you</option>{{range .Workers}}<option value="{{.ID}}"{{if eq .ID $sys.Chosen}} selected{{end}}>{{.DisplayName}} (digital worker)</option>{{end}}</select>
         <button>Save</button></label></form>{{end}}

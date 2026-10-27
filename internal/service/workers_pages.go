@@ -89,7 +89,7 @@ func (s *Service) workersPage(w http.ResponseWriter, r *http.Request, m componen
 			s.connectWorker(w, ctx, m, p, c)
 		case "disconnect":
 			if g, ok, _ := s.grantOf(ctx, p, org, c.Name); ok && c.Connect.Kind == connector.KindProvider {
-				_, _ = s.callProvider(ctx, c, org, provider.RevokePath, provider.Call{Member: m.Subject, Principal: p.forProvider(), Org: org, Grant: g.ProviderGrant})
+				_, _ = s.callProvider(ctx, c, org, provider.RevokePath, provider.Call{Member: m.Subject, Principal: p.forProvider(), Org: org, Grant: g.ProviderGrant, Options: g.Options})
 			}
 			if err := s.deleteGrantOf(ctx, p, org, c.Name); err != nil {
 				back(w, m, "Not disconnected: "+err.Error(), true)

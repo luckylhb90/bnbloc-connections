@@ -32,6 +32,9 @@ type Grant struct {
 	// Extra: the values the member pasted beside the key (connector.Extra).
 	Extra         map[string]string `json:"extra,omitempty"`
 	ProviderGrant string            `json:"providerGrant,omitempty"`
+	// Options: the member's choices on a provider connector's options
+	// (connector.ProviderOption), "true" or "false".
+	Options map[string]string `json:"options,omitempty"`
 	ConnectedAtMs int64             `json:"connectedAtMs"`
 }
 
