@@ -304,9 +304,11 @@ A `pending` connect means the member does something outside bnbloc: open
 the page the answer names in `open` (an https consent page, opened in place
 like a sign-in; or an app link), or answer a chat card. A connector whose
 consent page works only in one browser (a chat app's own) names it in
-`provider.openIn` (a regular expression of its user agent): there Connect
-opens the page in place; anywhere else it connects with `notify`, asking the
-provider for its own prompt (a chat card) instead. The member's Connections
+`provider.openIn` (a regular expression of its user agent) and/or
+`provider.openWith` (names the app injects on the page's window where it
+hosts it, any one): there Connect opens the page in place; anywhere else it
+connects with `notify`, asking the provider for its own prompt (a chat card)
+instead, and a waiting row does not offer a link that cannot work. The member's Connections
 page then waits, followed by a hidden frame of the page that reloads itself
 every 5 seconds and tells the page when what it waits for changed (a
 sandboxed page cannot fetch itself); the page reloads only then, never while

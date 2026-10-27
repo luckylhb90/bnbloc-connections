@@ -118,7 +118,8 @@ type systemRow struct {
 	// OpenIn: the browsers a provider's consent page works in
 	// (connector.Provider.OpenIn); elsewhere Connect asks for the
 	// provider's own prompt.
-	OpenIn string
+	OpenIn   string
+	OpenWith string // connector.Provider.OpenWith, space-separated
 }
 
 // optionRow is one member option of a connection, on or off.
@@ -223,7 +224,7 @@ func (s *Service) connectionsPage(w http.ResponseWriter, r *http.Request, m comp
 		case c.Connect.APIKey != nil:
 			row.Help, row.Signs, row.Extra = c.Connect.APIKey.Help, c.Connect.APIKey.Sign != nil, c.Connect.APIKey.Extra
 		case c.Connect.Provider != nil:
-			row.Help, row.OpenIn = c.Connect.Provider.Help, c.Connect.Provider.OpenIn
+			row.Help, row.OpenIn, row.OpenWith = c.Connect.Provider.Help, c.Connect.Provider.OpenIn, strings.Join(c.Connect.Provider.OpenWith, " ")
 			if wt, ok := s.consentWaitFor(ctx, m.Subject, m.Org, c.Name); ok && !v.Connected {
 				row.Waiting, row.Open = true, wt.Open
 				live = append(live, c.Name+":consent")

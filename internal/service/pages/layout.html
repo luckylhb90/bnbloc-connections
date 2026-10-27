@@ -58,12 +58,22 @@ label{display:block;margin:6px 0 2px;font-size:13px;color:var(--muted)}table{bor
     if (e.source === frame.contentWindow && e.data === "bnbloc-live-changed") { frame.remove(); reloadWhenIdle(); }
   });
 })();
+// consentHere reports whether a provider's consent page works on this
+// page: its browser (data-open-in, a user agent pattern) and a name the host
+// injects (data-open-with, any one of them); no rule: anywhere.
+function consentHere(el) {
+  var ua = el.getAttribute("data-open-in") || "";
+  var names = (el.getAttribute("data-open-with") || "").split(" ").filter(Boolean);
+  if (ua && !new RegExp(ua).test(navigator.userAgent)) return false;
+  return !names.length || names.some(function (n) { return n in window; });
+}
+// A consent link that cannot work on this page is not offered.
+document.querySelectorAll("[data-open-link]").forEach(function (a) { if (!consentHere(a)) a.hidden = true; });
 document.addEventListener("submit", function (e) {
-  // A provider's consent page that works only in some browser (a chat
-  // app's, data-open-in): Connect opens it in place there, and anywhere else
+  // A provider's consent page that works only where it is hosted a certain
+  // way (consentHere): Connect opens it in place there, and anywhere else
   // asks the provider for its own prompt (notify) instead.
-  var openIn = e.target.getAttribute("data-open-in");
-  if (openIn && !new RegExp(openIn).test(navigator.userAgent) && e.target.notify) e.target.notify.value = "1";
+  if (e.target.notify && !consentHere(e.target)) e.target.notify.value = "1";
   var b = e.submitter || e.target.querySelector("button");
   if (!b) return;
   if (b.name) { var h = document.createElement("input"); h.type = "hidden"; h.name = b.name; h.value = b.value; e.target.appendChild(h); }

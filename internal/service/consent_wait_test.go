@@ -136,4 +136,13 @@ func TestProviderOpenIn(t *testing.T) {
 	if err := c.Validate(); err == nil {
 		t.Fatal("a broken openIn pattern is valid")
 	}
+	c.Connect.Provider.OpenIn, c.Connect.Provider.OpenWith = "", []string{"hostBridge", "other_bridge"}
+	fx.addConnector(c)
+	if body := fx.page(false, http.MethodGet, "/pages/connections", nil).Body.String(); !strings.Contains(body, `data-open-with="hostBridge other_bridge"`) {
+		t.Fatalf("the Connect form without openWith:\n%s", body)
+	}
+	c.Connect.Provider.OpenWith = []string{"alert(1)"}
+	if err := c.Validate(); err == nil {
+		t.Fatal("an openWith that is not a name is valid")
+	}
 }

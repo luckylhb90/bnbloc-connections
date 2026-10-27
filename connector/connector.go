@@ -241,6 +241,10 @@ type Provider struct {
 	// to prompt the member its own way (provider.Call.Notify). Empty: the
 	// page works in any browser.
 	OpenIn string `json:"openIn,omitempty"`
+	// OpenWith are names the page must find on its window for the consent
+	// page to work there (an app's script bridge, injected only where the
+	// app hosts the page); any one is enough. With OpenIn, both must hold.
+	OpenWith []string `json:"openWith,omitempty"`
 }
 
 // ProviderOption is one choice a member makes on their connection to a
@@ -255,6 +259,9 @@ type ProviderOption struct {
 const MaxProviderOptions = 8
 
 var optionKey = regexp.MustCompile(`^[a-z][a-zA-Z0-9]{0,31}$`)
+
+// scriptName is a name on a page's window (provider.openWith).
+var scriptName = regexp.MustCompile(`^[A-Za-z_$][A-Za-z0-9_$]{0,63}$`)
 
 // OptionValues are a member's options: each declared option as they set
 // it ("true" or "false"), else its default. Undeclared keys are dropped.
@@ -497,6 +504,9 @@ func (c Connect) validate() error {
 		}
 		if _, err := regexp.Compile(p.OpenIn); err != nil || len(p.OpenIn) > 200 {
 			return errors.New("provider.openIn: a regular expression of at most 200 characters")
+		}
+		if len(p.OpenWith) > 8 || slices.ContainsFunc(p.OpenWith, func(n string) bool { return !scriptName.MatchString(n) }) {
+			return errors.New("provider.openWith: at most 8 script names (letters, digits, _ and $)")
 		}
 		if len(p.Options) > MaxProviderOptions {
 			return fmt.Errorf("provider.options: at most %d", MaxProviderOptions)
