@@ -33,36 +33,38 @@ label{display:block;margin:6px 0 2px;font-size:13px;color:var(--muted)}table{bor
 // A form being sent says so at once: its button is held and tells what it
 // waits for (data-busy), so a slow answer is never taken for a missed click.
 // Something the page waits for (a consent, a check, a try) is followed in
-// the background: the page asks itself every 5 seconds and reloads only
-// when what it waits for changed, never while the person is typing or
-// selecting, and stops after 15 minutes.
+// the background by a hidden frame of this page (?live=): it reloads itself
+// every 5 seconds and posts a message when what the page waits for
+// changed; the page then reloads, never while the person is typing or
+// selecting. A sandboxed page cannot fetch itself (its origin is opaque);
+// a message between frames needs none. Stops after 15 minutes.
 (function () {
   var live = document.querySelector('meta[name="live"]');
   if (!live) return;
-  var start = Date.now();
+  var frame = document.createElement("iframe");
+  frame.hidden = true;
+  frame.src = location.pathname + "?live=" + encodeURIComponent(live.content);
+  document.body.appendChild(frame);
+  setTimeout(function () { frame.remove(); }, 15 * 60 * 1000);
   var busy = function () {
     var a = document.activeElement;
     return (a && /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName)) || String(window.getSelection()) !== "";
   };
-  var timer = setInterval(function () {
-    if (Date.now() - start > 15 * 60 * 1000) { clearInterval(timer); return; }
-    fetch(location.href, { credentials: "same-origin", cache: "no-store" })
-      .then(function (r) { return r.text(); })
-      .then(function (html) {
-        var next = new DOMParser().parseFromString(html, "text/html").querySelector('meta[name="live"]');
-        if ((next ? next.content : "") === live.content || busy()) return;
-        clearInterval(timer);
-        location.reload();
-      })
-      .catch(function () {});
-  }, 5000);
+  var reloadWhenIdle = function () {
+    if (busy()) { setTimeout(reloadWhenIdle, 2000); return; }
+    location.reload();
+  };
+  window.addEventListener("message", function (e) {
+    if (e.source === frame.contentWindow && e.data === "bnbloc-live-changed") { frame.remove(); reloadWhenIdle(); }
+  });
 })();
 document.addEventListener("submit", function (e) {
-  // A provider's Connect opens its authorization page in a new tab; this
-  // page then shows the connection waiting (and completes it on its own).
+  // A provider's Connect may answer an app link (the chat app opens its
+  // authorization screen; this page stays): the page then shows the
+  // connection waiting, and completes it on its own.
   var wait = e.target.getAttribute("data-wait");
   if (wait) {
-    setTimeout(function () { location.href = location.pathname + "?system=" + encodeURIComponent(wait); }, 800);
+    setTimeout(function () { location.href = location.pathname + "?system=" + encodeURIComponent(wait); }, 1500);
     return;
   }
   var b = e.submitter || e.target.querySelector("button");

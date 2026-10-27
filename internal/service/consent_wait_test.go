@@ -21,7 +21,7 @@ import (
 // A consent given in the browser: Connect opens the provider's consent page
 // (no chat card), the page waits and asks the provider only to check, and
 // the connection completes on its own once the consent arrived, on the page
-// or at the agent's next request; "Send it to me in chat instead" asks the provider
+// or at the agent's next request; "Send it to me in chat again" asks the provider
 // to prompt through its own channel.
 func TestConsentInTheBrowser(t *testing.T) {
 	fx := newFixture(t)
@@ -59,15 +59,22 @@ func TestConsentInTheBrowser(t *testing.T) {
 		t.Fatalf("connect = %d %s (notify %v), want the consent page", rec.Code, rec.Header().Get("Location"), last().Notify)
 	}
 	body := fx.page(false, http.MethodGet, "/pages/connections", nil).Body.String()
-	if !strings.Contains(body, "waiting for your authorization") || !strings.Contains(body, `<meta name="live" content="issues:consent">`) || !strings.Contains(body, "Send it to me in chat instead") {
+	if !strings.Contains(body, "waiting for your authorization") || !strings.Contains(body, `<meta name="live" content="issues:consent">`) || !strings.Contains(body, "Send it to me in chat again") {
 		t.Fatalf("the waiting row:\n%s", body)
 	}
 	if c := last(); !c.Check || grant() != nil {
 		t.Fatalf("the waiting page asked %+v (want a check only), grant %s", c, grant())
 	}
+	// The page's hidden follower answers what it waits for now.
+	if live := fx.page(false, http.MethodGet, "/pages/connections?live=issues:consent", nil).Body.String(); !strings.Contains(live, `if ("issues:consent" !== "issues:consent")`) {
+		t.Fatalf("the follower while waiting:\n%s", live)
+	}
 	mu.Lock()
 	consented = true
 	mu.Unlock()
+	if live := fx.page(false, http.MethodGet, "/pages/connections?live=issues:consent", nil).Body.String(); !strings.Contains(live, `if ("" !== "issues:consent")`) || grant() == nil {
+		t.Fatalf("the follower after the consent:\n%s", live)
+	}
 	if body := fx.page(false, http.MethodGet, "/pages/connections", nil).Body.String(); strings.Contains(body, "waiting for your authorization") || grant() == nil {
 		t.Fatalf("the consent did not complete the connection on the page")
 	}
@@ -92,5 +99,23 @@ func TestConsentInTheBrowser(t *testing.T) {
 	rec = fx.page(false, http.MethodPost, "/pages/connections/connect", url.Values{"system": {"issues"}, "notify": {"1"}})
 	if !last().Notify || rec.Header().Get("Location") == page {
 		t.Fatalf("send in chat = notify %v, location %s", last().Notify, rec.Header().Get("Location"))
+	}
+}
+
+// Where a member may be sent to consent: an https page (a new tab) or an
+// app link (the app opens; the page stays); never a script or a browser
+// internal address.
+func TestOpenable(t *testing.T) {
+	for open, want := range map[string][2]bool{
+		"https://sso.example.com/consent?x=1":     {true, false},
+		"chatapp://webview?url=https%3A%2F%2Fx.y": {true, true},
+		"javascript:alert(1)":                     {false, false},
+		"data:text/html,x":                        {false, false},
+		"http://sso.example.com/consent":          {false, false},
+		"file:///etc/passwd":                      {false, false},
+	} {
+		if ok, app := openable(open); ok != want[0] || app != want[1] {
+			t.Errorf("openable(%q) = %v %v, want %v", open, ok, app, want)
+		}
 	}
 }

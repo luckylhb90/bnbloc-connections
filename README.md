@@ -301,14 +301,17 @@ a time. `pending` means the member must do something outside bnbloc
 first; `admin` marks a refusal an administrator fixes.
 
 A `pending` connect means the member does something outside bnbloc: open
-the https page the answer names in `open` (Connect opens it in a new tab),
-or answer a chat card. The member's Connections page then waits (followed
-in the background for up to 15 minutes, never reloading while they type):
-it asks the provider with `check` (report only, never prompt) and connects
-once the provider answers `connected`, as does the member's agent's next
-request to that system, so nobody presses Connect twice. A waiting row's
-second button connects with `notify`: the provider prompts through its own
-channel (a chat card) instead.
+what the answer names in `open` (an https page, opened in its place like a
+sign-in, or an app link such as a chat app's own link to its consent screen:
+the app opens and this page stays), or answer a chat card. The member's
+Connections page then waits, followed by a hidden frame of the page that
+reloads itself every 5 seconds and tells the page when what it waits for
+changed (a sandboxed page cannot fetch itself); the page reloads only then,
+never while the person types, for up to 15 minutes. Each look asks the
+provider with `check` (report only, never prompt) and connects once it
+answers `connected`, as does the member's agent's next request to that
+system, so nobody presses Connect twice. A waiting row offers the link again
+and the chat prompt again (`notify`).
 
 ## What is kept, where
 

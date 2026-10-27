@@ -111,9 +111,11 @@ type systemRow struct {
 	// Options are a connected provider connector's member options, as set.
 	Options []optionRow
 	// Waiting: the connection waits for the member's consent at Open
-	// (consent_wait.go); the page refreshes until it arrives.
-	Waiting bool
-	Open    string
+	// (consent_wait.go), followed until it arrives; OpenInTab: Open is a
+	// page (a new tab), not an app link (which leaves this page in place).
+	Waiting   bool
+	Open      string
+	OpenInTab bool
 }
 
 // optionRow is one member option of a connection, on or off.
@@ -220,7 +222,8 @@ func (s *Service) connectionsPage(w http.ResponseWriter, r *http.Request, m comp
 		case c.Connect.Provider != nil:
 			row.Help = c.Connect.Provider.Help
 			if wt, ok := s.consentWaitFor(ctx, m.Subject, m.Org, c.Name); ok && !v.Connected {
-				row.Waiting, row.Open = true, wt.Open
+				_, app := openable(wt.Open)
+				row.Waiting, row.Open, row.OpenInTab = true, wt.Open, wt.Open != "" && !app
 				live = append(live, c.Name+":consent")
 			}
 			if v.Connected {
@@ -265,6 +268,10 @@ func (s *Service) connectionsPage(w http.ResponseWriter, r *http.Request, m comp
 			}
 			inRoom = append(inRoom, row)
 		}
+	}
+	if q.Has("live") {
+		writeLive(w, strings.Join(live, " "), q.Get("live"))
+		return
 	}
 	render(w, http.StatusOK, "connections", map[string]any{
 		"Title": "Connections", "Member": m.Subject, "Admin": m.Admin, "Systems": rows, "Activity": acts, "Waiting": waiting, "Base": m.PageURL,
@@ -813,6 +820,10 @@ func (s *Service) adminPage(w http.ResponseWriter, r *http.Request, m component.
 		if d.Error == "" {
 			live = append(live, "drafting:"+strconv.Itoa(i))
 		}
+	}
+	if q.Has("live") {
+		writeLive(w, strings.Join(live, " "), q.Get("live"))
+		return
 	}
 	render(w, http.StatusOK, "admin", map[string]any{"Title": "Connectors", "Connectors": rows, "Drafts": drafts, "Drafting": drafting, "Base": m.PageURL, "Msg": q.Get("msg"), "Err": q.Get("err") != "", "Refresh": len(live) > 0, "State": strings.Join(live, " ")})
 }
