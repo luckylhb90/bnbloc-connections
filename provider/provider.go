@@ -62,6 +62,11 @@ type Call struct {
 	// Options are the member's choices on this connection, every option
 	// the connector declares ("true" or "false"; connector.ProviderOption).
 	Options map[string]string `json:"options,omitempty"`
+	// FromMember (authorize): the connector sends its requests from the
+	// member's computer, so a session made there (Answer.SignIn and
+	// Answer.Session) can be used. A provider signs in there by default
+	// when it can; signing in on its own network is its option.
+	FromMember bool `json:"fromMember,omitempty"`
 	// SignedIn (authorize): the answers to the SignIn steps the provider
 	// asked for, sent from the member's computer with their held session,
 	// in order. The provider answers the request's headers from them.

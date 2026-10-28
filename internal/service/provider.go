@@ -62,7 +62,7 @@ func (s *Service) providerClient() *http.Client {
 
 // providerAuth is what the provider says one request carries.
 func (s *Service) providerAuth(ctx context.Context, c connector.Connector, org string, p principal, g *Grant, force bool, signedIn []provider.Step) (cachedAuth, error) {
-	a, err := s.callProvider(ctx, c, org, provider.AuthorizePath, provider.Call{Member: p.Member, Principal: p.forProvider(), Org: org, Grant: g.ProviderGrant, Reach: g.Reach, Force: force, Options: g.Options, SignedIn: signedIn})
+	a, err := s.callProvider(ctx, c, org, provider.AuthorizePath, provider.Call{Member: p.Member, Principal: p.forProvider(), Org: org, Grant: g.ProviderGrant, Reach: g.Reach, Force: force, Options: g.Options, SignedIn: signedIn, FromMember: c.FromMember()})
 	if err != nil {
 		return cachedAuth{}, err
 	}

@@ -345,7 +345,10 @@ start of its body); the provider answers `session: true` and the headers
 (a CSRF token read from a step). Every request then carries the held
 session, which never leaves the member's computer; a refused one signs in
 again once. A connector sending from the server cannot use a session (an
-administrator's item).
+administrator's item). Every `/authorize` says `fromMember` (the connector
+sends from members' computers): a provider then signs in there by default
+when it can, and switching the connector to "Send from this service" moves
+its sign-in to the provider's own network too.
 
 ## What is kept, where
 

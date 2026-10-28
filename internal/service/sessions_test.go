@@ -68,7 +68,7 @@ func TestSignInOnTheMembersComputer(t *testing.T) {
 	if out.Send == nil || out.Send.StepsOnly || out.Send.Session != "connections:maya" || out.Send.Header["X-Csrf-Token"][0] != "T1" {
 		t.Fatalf("after the sign-in = %+v", out.Send)
 	}
-	if last := calls[len(calls)-1]; len(last.SignedIn) != 2 || last.SignedIn[1].Status != 200 {
+	if last := calls[len(calls)-1]; len(last.SignedIn) != 2 || last.SignedIn[1].Status != 200 || !last.FromMember {
 		t.Fatalf("authorize was not given the sign-in: %+v", last)
 	}
 	in.Report = &component.EgressReport{Attempt: 1, Status: 200, Body: []byte(`{"code":0}`)}
