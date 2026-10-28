@@ -91,6 +91,11 @@ and reviews the drafts agents post there.
 - `examples`: up to 5 things a member may ask their agent to do there, one
   line each; the Connections page offers them to copy ("Try asking your
   agent").
+- `agentAuthorization` (provider connectors only): the agent's own
+  `Authorization` header goes through instead of being removed, for a
+  system whose API takes a key the person gives the agent behind a gateway
+  the connection signs in to with other headers. `Cookie` and
+  `Proxy-Authorization` are still removed.
 - `hosts`: exact names; only these are intercepted.
 - `connect.kind`:
   - `oauth2`: authorization code with PKCE; `issuer` (RFC 8414 / OIDC

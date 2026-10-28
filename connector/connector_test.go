@@ -106,3 +106,25 @@ func TestCheckPathRefusesAmbiguousPaths(t *testing.T) {
 		}
 	}
 }
+
+// agentAuthorization lets the agent's Authorization through, only on a
+// provider connector; Cookie and Proxy-Authorization are still removed.
+func TestAgentAuthorization(t *testing.T) {
+	c := sample()
+	c.AgentAuthorization = true
+	if c.Validate() == nil {
+		t.Fatal("agentAuthorization on a key connector passes")
+	}
+	c.Connect = Connect{Kind: KindProvider, Provider: &Provider{URL: "https://provider.example.com", App: "app"}}
+	if err := c.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	for _, h := range c.CredentialHeaders() {
+		if h == "Authorization" {
+			t.Fatal("Authorization is still removed")
+		}
+	}
+	if hs := c.CredentialHeaders(); len(hs) != 2 || hs[0] != "Cookie" {
+		t.Fatalf("removed = %v", hs)
+	}
+}

@@ -66,6 +66,12 @@ type Connector struct {
 	// not reach). Either way the credentials and the policy are this
 	// component's.
 	SendFrom string `json:"sendFrom,omitempty"`
+	// AgentAuthorization: the agent's own Authorization header goes through
+	// (a system whose API takes a key the person gives the agent, behind a
+	// gateway the connection signs in to with other headers). Only on a
+	// provider connector; a credential the connection sets in Authorization
+	// still replaces it.
+	AgentAuthorization bool `json:"agentAuthorization,omitempty"`
 	// Enabled: the organization's members may connect it and their agents
 	// reach it.
 	Enabled bool `json:"enabled,omitempty"`
@@ -360,6 +366,9 @@ func (c Connector) Validate() error {
 		if !component.ValidEgressHost(h) {
 			return fmt.Errorf("host %q: an exact lower-case DNS name (no port, no address, no wildcard)", h)
 		}
+	}
+	if c.AgentAuthorization && c.Connect.Kind != KindProvider {
+		return errors.New("agentAuthorization: only on a provider connector (a key or a token of the connection's own rides in Authorization)")
 	}
 	if c.SendFrom != "" && c.SendFrom != SendServer && c.SendFrom != SendMember {
 		return errors.New(`sendFrom: "server" (default) or "member"`)
@@ -777,6 +786,9 @@ func (c Connector) IsExpired(status int, location string, body []byte) bool {
 // one is removed from what an agent sends.
 func (c Connector) CredentialHeaders() []string {
 	out := []string{"Authorization", "Cookie", "Proxy-Authorization"}
+	if c.AgentAuthorization {
+		out = out[1:]
+	}
 	if a := c.Connect.APIKey; a != nil {
 		if a.In == "header" {
 			out = append(out, a.Name)
