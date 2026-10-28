@@ -100,6 +100,11 @@ and reviews the drafts agents post there.
   has not added is refused, and the agent learns the names (its guide, the
   `/systems` answer), never a key. Not on a key connector.
 - `hosts`: exact names; only these are intercepted.
+- `paths` (connectors sending from members' computers): the path prefixes
+  this connector handles on its hosts. A request to another path of them
+  goes out from the member's computer as the agent sent it and is never
+  seen here (a host other tools call too, where this connector is one
+  API). Prefixes match whole segments.
 - `connect.kind`:
   - `oauth2`: authorization code with PKCE; `issuer` (RFC 8414 / OIDC
     discovery) or the endpoints; `clientId`; `scopes.read` and
@@ -353,7 +358,15 @@ start of its body); the provider answers `session: true` and the headers
 (a CSRF token read from a step). Every request then carries the held
 session, which never leaves the member's computer; a refused one signs in
 again once. A connector sending from the server cannot use a session (an
-administrator's item). Every `/authorize` says `fromMember` (the connector
+administrator's item).
+
+A provider whose system wants each request signed with a key the
+provider keeps (an app key's HMAC over the method, path, query and body)
+answers `/authorize` with `signEach: true`: connections then asks
+`POST {url}/sign` (`SignRequest{call, method, path, query, body}`,
+signed like every call) for each request and sets the headers it answers
+(`Signed{header}`), from here or on the member's computer. A streamed
+body cannot be signed (refused). Every `/authorize` says `fromMember` (the connector
 sends from members' computers): a provider then signs in there by default
 when it can, and switching the connector to "Send from this service" moves
 its sign-in to the provider's own network too.

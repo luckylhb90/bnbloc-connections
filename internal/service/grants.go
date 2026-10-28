@@ -80,8 +80,10 @@ type cachedAuth struct {
 	// never sent.
 	key, secret string
 	// session: the request also carries the principal's session held on
-	// the member's computer (provider.Answer.Session).
-	session bool
+	// the member's computer (provider.Answer.Session). signEach: every
+	// request is signed by the provider too (provider.Answer.SignEach).
+	session  bool
+	signEach bool
 }
 
 func (s *Service) cachedAuthFor(k grantKey) (cachedAuth, bool) {

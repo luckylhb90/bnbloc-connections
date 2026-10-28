@@ -39,6 +39,7 @@ func (s *Service) handleHosts(w http.ResponseWriter, r *http.Request, t componen
 		for i, v := range systems {
 			if v.Connected {
 				out.Hosts = append(out.Hosts, list[i].Hosts...)
+				claimPaths(&out, list[i])
 				for k, val := range list[i].CLIEnv {
 					out.Env[k] = val
 				}
@@ -56,11 +57,25 @@ func (s *Service) handleHosts(w http.ResponseWriter, r *http.Request, t componen
 	out.Hosts = append(out.Hosts, s.SelfHost())
 	for _, c := range list {
 		out.Hosts = append(out.Hosts, c.Hosts...)
+		claimPaths(&out, c)
 		for k, v := range c.CLIEnv {
 			out.Env[k] = v
 		}
 	}
 	writeJSON(w, http.StatusOK, out)
+}
+
+// claimPaths says which of c's hosts it handles only on some paths.
+func claimPaths(out *component.EgressHosts, c connector.Connector) {
+	if len(c.Paths) == 0 {
+		return
+	}
+	if out.Paths == nil {
+		out.Paths = map[string][]string{}
+	}
+	for _, h := range c.Hosts {
+		out.Paths[h] = c.Paths
+	}
 }
 
 // refusal is an egress answer of the component's own: JSON the agent
@@ -119,6 +134,11 @@ func (s *Service) serve(ctx context.Context, t component.Turn, in component.Egre
 	}
 	if c.Name == "" {
 		return refusal(http.StatusForbidden, host+" is not a system your organization enabled", nil, nil), nil
+	}
+	if !c.HandlesPath(u.Path) {
+		// Another API of a host this connector shares: never authenticated
+		// here (a bridge too old to send it out as it is).
+		return refusal(http.StatusForbidden, u.Path+" is not part of "+c.DisplayName+": update the bnbloc desktop app to reach it as it is", nil, nil), nil
 	}
 	target := in.Method + " " + u.Path
 	// The app key's internal header is the component's alone: an agent's
@@ -385,6 +405,27 @@ func (s *Service) memberSend(ctx context.Context, c connector.Connector, org str
 	if auth.session {
 		send.Session = sessionName(p)
 	}
+	if auth.signEach {
+		// The provider signs this exact request (its key never leaves it);
+		// the signature headers ride with the connection's. The body is the
+		// command's own: a streamed one cannot be signed.
+		if in.Streamed {
+			return nil, auth, errors.New(c.DisplayName + " signs each request over its body: a body this large cannot be sent")
+		}
+		hs, err := s.providerSigned(ctx, c, org, p, *g, in.Method, u, in.Body)
+		if err != nil {
+			return nil, auth, err
+		}
+		merged := map[string][]string{}
+		for k, v := range send.Header {
+			merged[k] = v
+		}
+		for k, v := range hs {
+			merged[http.CanonicalHeaderKey(k)] = []string{v}
+			send.Remove = append(send.Remove, k)
+		}
+		send.Header = merged
+	}
 	if a := c.Connect.APIKey; a != nil && a.Sign != nil {
 		// Signed here over the exact query and body the bridge sends.
 		var changed bool
@@ -548,6 +589,15 @@ func (s *Service) call(ctx context.Context, c connector.Connector, org string, p
 		}
 		for k, v := range signHeaders {
 			req.Header[k] = v
+		}
+		if auth.signEach {
+			hs, err := s.providerSigned(ctx, c, org, p, *g, in.Method, &target, body)
+			if err != nil {
+				return component.EgressResponse{}, err
+			}
+			for k, v := range hs {
+				req.Header.Set(k, v)
+			}
 		}
 		resp, err := s.upstream().Do(req)
 		if err != nil {

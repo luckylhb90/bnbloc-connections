@@ -41,8 +41,14 @@ type Connector struct {
 	Internal bool `json:"internal,omitempty"`
 	// Examples are things a member may ask their agent to do there, in a
 	// member's words: the Connections page offers them to try.
-	Examples    []string          `json:"examples,omitempty"`
-	Hosts       []string          `json:"hosts"`
+	Examples []string `json:"examples,omitempty"`
+	Hosts    []string `json:"hosts"`
+	// Paths: the path prefixes this connector handles on its hosts; empty:
+	// every path. A request to another path of its hosts goes out from the
+	// member's computer as the agent sent it and is never seen here (a host
+	// other tools also call, where this connector is one API). Needs
+	// sendFrom member.
+	Paths       []string          `json:"paths,omitempty"`
 	Connect     Connect           `json:"connect"`
 	Policy      Policy            `json:"policy"`
 	ExpiredWhen []Expired         `json:"expiredWhen,omitempty"`
@@ -402,6 +408,19 @@ func (c Connector) Validate() error {
 			return errors.New("appKeys.name: the header the key goes in")
 		}
 	}
+	if len(c.Paths) > 0 {
+		if !c.FromMember() {
+			return errors.New("paths: only on a connector that sends from members' computers (another path goes out from there as the agent sent it)")
+		}
+		if len(c.Paths) > 64 {
+			return errors.New("paths: at most 64")
+		}
+		for _, p := range c.Paths {
+			if !strings.HasPrefix(p, "/") || len(p) > 256 || strings.ContainsAny(p, "?#*") {
+				return fmt.Errorf("paths %q: a path prefix starting with /", p)
+			}
+		}
+	}
 	if c.SendFrom != "" && c.SendFrom != SendServer && c.SendFrom != SendMember {
 		return errors.New(`sendFrom: "server" (default) or "member"`)
 	}
@@ -682,6 +701,20 @@ func (r Rule) validate() error {
 
 // Handles reports whether host is one of the connector's.
 func (c Connector) Handles(host string) bool { return slices.Contains(c.Hosts, host) }
+
+// HandlesPath reports whether path is one this connector handles on its
+// hosts (Paths: whole segments under a prefix; none: every path).
+func (c Connector) HandlesPath(path string) bool {
+	if len(c.Paths) == 0 {
+		return true
+	}
+	for _, p := range c.Paths {
+		if path == p || strings.HasPrefix(path, strings.TrimSuffix(p, "/")+"/") {
+			return true
+		}
+	}
+	return false
+}
 
 // readMethods are a read rule's methods when it names none.
 var readMethods = []string{"GET", "HEAD", "OPTIONS"}

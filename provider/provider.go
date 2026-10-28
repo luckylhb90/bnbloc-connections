@@ -22,7 +22,26 @@ const (
 	ConnectPath   = "/connect"
 	AuthorizePath = "/authorize"
 	RevokePath    = "/revoke"
+	// SignPath (a provider whose Answer said SignEach): the headers one
+	// request carries beside the authorization, made over that request
+	// (a signature with a key the provider keeps).
+	SignPath = "/sign"
 )
+
+// SignRequest is the request a provider signs (SignPath), with the Call
+// that authorized it: its method, path, raw query and body as they go out.
+type SignRequest struct {
+	Call   Call   `json:"call"`
+	Method string `json:"method"`
+	Path   string `json:"path"`
+	Query  string `json:"query,omitempty"`
+	Body   []byte `json:"body,omitempty"`
+}
+
+// Signed is a provider's answer to SignPath: the headers to set.
+type Signed struct {
+	Header map[string]string `json:"header"`
+}
 
 // SignatureHeader carries the call's signature (component.Sign over the
 // raw body with the connector's provider secret).
@@ -141,4 +160,8 @@ type Answer struct {
 	// again with Call.SignedIn.
 	Session bool   `json:"session,omitempty"`
 	SignIn  []Step `json:"signIn,omitempty"`
+	// SignEach (authorize): every request is also signed by the provider
+	// (SignPath) with a key it keeps, over its method, path, query and
+	// body, beside Header.
+	SignEach bool `json:"signEach,omitempty"`
 }

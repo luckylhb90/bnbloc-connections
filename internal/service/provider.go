@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"sort"
 	"strings"
 	"time"
@@ -87,7 +88,7 @@ func (s *Service) providerAuth(ctx context.Context, c connector.Connector, org s
 			return cachedAuth{}, err
 		}
 	}
-	out := cachedAuth{header: http.Header{}, session: a.Session}
+	out := cachedAuth{header: http.Header{}, session: a.Session, signEach: a.SignEach}
 	for k, v := range a.Header {
 		out.header.Set(k, v)
 	}
@@ -108,6 +109,31 @@ func (s *Service) providerAuth(ctx context.Context, c connector.Connector, org s
 		out.until = time.UnixMilli(a.ExpiresAtMs - 30_000)
 	}
 	return out, nil
+}
+
+// providerSigned are the headers the provider makes over one request
+// (provider.SignPath) for a connection whose authorization said SignEach.
+func (s *Service) providerSigned(ctx context.Context, c connector.Connector, org string, p principal, g Grant, method string, u *url.URL, body []byte) (map[string]string, error) {
+	call := provider.Call{Member: p.Member, Principal: p.forProvider(), Org: org, Grant: g.ProviderGrant, Reach: g.Reach, Options: g.Options, FromMember: c.FromMember()}
+	pc := c.Connect.Provider
+	call.App, call.Params, call.Options = pc.App, pc.Params, pc.OptionValues(call.Options)
+	raw, _ := json.Marshal(provider.SignRequest{Call: call, Method: method, Path: u.EscapedPath(), Query: u.RawQuery, Body: body})
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, strings.TrimRight(pc.URL, "/")+provider.SignPath, bytes.NewReader(raw))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set(provider.SignatureHeader, provider.Sign(s.secrets(ctx, org, c.Name).ProviderSecret, s.now(), raw))
+	resp, err := s.providerClient().Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("the %s provider is unreachable", c.DisplayName)
+	}
+	defer resp.Body.Close()
+	var out provider.Signed
+	if resp.StatusCode != http.StatusOK || json.NewDecoder(io.LimitReader(resp.Body, 64<<10)).Decode(&out) != nil || len(out.Header) == 0 {
+		return nil, &providerError{msg: c.DisplayName + "'s provider did not sign the request", admin: true}
+	}
+	return out.Header, nil
 }
 
 // signInNeeded: the provider asks for a sign-in's steps sent from the
