@@ -174,6 +174,23 @@ type principal struct {
 	Worker *Worker
 }
 
+// scope is where the principal's own values are kept: the member's, or
+// the organization's for a worker.
+func (p principal) scope(org string) platform.Scope {
+	if p.Worker == nil {
+		return platform.Member(p.Member)
+	}
+	return platform.Org(org)
+}
+
+// keySuffix sets a worker's kept values apart from the organization's own.
+func (p principal) keySuffix() string {
+	if p.Worker == nil {
+		return ""
+	}
+	return ":worker:" + p.Worker.ID
+}
+
 // key names the principal's credentials in memory and its rate.
 func (p principal) key() string {
 	if p.Worker != nil {
@@ -231,6 +248,7 @@ func (s *Service) deleteGrantOf(ctx context.Context, p principal, org, name stri
 		return s.deleteGrant(ctx, p.Member, org, name)
 	}
 	s.dropAuth(grantKey{p.key(), org, name})
+	s.forgetKeptAuth(ctx, p, org, name)
 	return s.P.Delete(ctx, platform.Org(org), workerGrantKey(p.Worker.ID, name))
 }
 

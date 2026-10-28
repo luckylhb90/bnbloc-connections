@@ -602,7 +602,15 @@ func TestProviderConnectAndAuthorize(t *testing.T) {
 	if last.App != "app-1" || last.Params["authType"] != "cookies" || last.Member != "maya" {
 		t.Fatalf("provider call = %+v", last)
 	}
+	// The authorization is kept across a restart (memory dropped): the
+	// provider is not asked again until it ends or is refused.
 	fx.svc.dropAuth(grantKey{"maya", "home", "issues"})
+	n := len(calls)
+	if out, _ = fx.egress(component.DriveOwn, "GET", "https://example.com/api/page/1", "", nil); out.Status != 200 || len(calls) != n {
+		t.Fatalf("after a restart = %d, provider asked %d times", out.Status, len(calls)-n)
+	}
+	fx.svc.dropAuth(grantKey{"maya", "home", "issues"})
+	fx.svc.forgetKeptAuth(context.Background(), asMember("maya"), "home", "issues")
 	out, _ = fx.egress(component.DriveOwn, "GET", "https://example.com/api/page/1", "", nil)
 	if out.Status != http.StatusForbidden || !strings.Contains(string(out.Body), "administrator") || out.Card != nil {
 		t.Fatalf("admin refusal = %d %s", out.Status, out.Body)

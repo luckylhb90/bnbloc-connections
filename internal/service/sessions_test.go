@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"sync"
 	"testing"
@@ -87,5 +88,66 @@ func TestSignInOnTheMembersComputer(t *testing.T) {
 	fx.svc.dropAuth(grantKey{"maya", "home", "issues"})
 	if out, _ := fx.egress(component.DriveOwn, "GET", "https://example.com/api/apps", "", nil); out.Status != http.StatusForbidden || !strings.Contains(string(out.Body), "members' computers") {
 		t.Fatalf("server connector = %d %s", out.Status, out.Body)
+	}
+}
+
+// A sign-in on the member's computer happens once: a second request while
+// it is under way waits for it instead of starting its own, and the
+// result is kept across a restart of this component (memory dropped): the
+// provider is not asked to sign in again until the system refuses it.
+func TestSignInOnceAndKept(t *testing.T) {
+	fx := newFixture(t)
+	var mu sync.Mutex
+	signIns := 0
+	prov := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		var c provider.Call
+		_ = json.Unmarshal(body, &c)
+		a := provider.Answer{Status: provider.Connected, Grant: "g1"}
+		if r.URL.Path == "/conn/authorize" {
+			if len(c.SignedIn) > 0 {
+				a = provider.Answer{Session: true, Header: map[string]string{"X-CSRF-TOKEN": "T1"}, ExpiresAtMs: time.Now().Add(time.Hour).UnixMilli()}
+			} else {
+				mu.Lock()
+				signIns++
+				mu.Unlock()
+				a = provider.Answer{SignIn: []provider.Step{{URL: "https://example.com/signin"}}}
+			}
+		}
+		_ = json.NewEncoder(w).Encode(a)
+	}))
+	defer prov.Close()
+	c := issues()
+	c.SendFrom = connector.SendMember
+	c.Connect = connector.Connect{Kind: connector.KindProvider, Provider: &connector.Provider{URL: prov.URL + "/conn", App: "app-1"}}
+	fx.addConnector(c)
+	_ = fx.svc.P.PutJSON(context.Background(), platform.Org("home"), secretsPrefix+"issues", connector.Secrets{ProviderSecret: "s"})
+	fx.page(false, http.MethodPost, "/pages/connections/connect", url.Values{"system": {"issues"}})
+
+	in := component.EgressRequest{Method: "GET", URL: "https://example.com/api/apps"}
+	if out := fx.egressIn("room-1", in); out.Send == nil || !out.Send.StepsOnly {
+		t.Fatalf("first = %+v", out.Send)
+	}
+	// A second request while the first signs in: it waits, then rides on it.
+	done := make(chan component.EgressResponse)
+	go func() { done <- fx.egressIn("room-1", in) }()
+	time.Sleep(300 * time.Millisecond)
+	signed := in
+	signed.Report = &component.EgressReport{Steps: []component.EgressStepReport{{URL: "https://example.com/signin", Status: 302}}}
+	if out := fx.egressIn("room-1", signed); out.Send == nil || out.Send.StepsOnly {
+		t.Fatalf("after the sign-in = %+v", out.Send)
+	}
+	if out := <-done; out.Send == nil || out.Send.StepsOnly || out.Send.Header["X-Csrf-Token"][0] != "T1" {
+		t.Fatalf("the waiting request = %+v", out.Send)
+	}
+	// A restart: memory gone, the kept authorization serves.
+	fx.svc.dropAuth(grantKey{"maya", "home", "issues"})
+	if out := fx.egressIn("room-1", in); out.Send == nil || out.Send.StepsOnly || out.Send.Session == "" {
+		t.Fatalf("after a restart = %+v", out.Send)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if signIns != 1 {
+		t.Fatalf("signed in %d times", signIns)
 	}
 }

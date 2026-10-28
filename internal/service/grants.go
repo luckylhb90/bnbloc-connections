@@ -2,8 +2,12 @@ package service
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"sync"
@@ -67,6 +71,7 @@ func (s *Service) saveGrant(ctx context.Context, member, org string, g Grant) er
 
 func (s *Service) deleteGrant(ctx context.Context, member, org, name string) error {
 	s.dropAuth(grantKey{member, org, name})
+	s.forgetKeptAuth(ctx, asMember(member), org, name)
 	return s.P.Delete(ctx, platform.Member(member), grantStoreKey(org, name))
 }
 
@@ -94,6 +99,59 @@ func (s *Service) cachedAuthFor(k grantKey) (cachedAuth, bool) {
 		return cachedAuth{}, false
 	}
 	return a, true
+}
+
+// keptAuth is a provider's authorization kept sealed with the person's
+// connection until it ends, so a restart of this component does not sign
+// the person in again (each sign-in can be visible on the system: an
+// OAuth authorization, a session, a rate limit). A refusal (Force) or a
+// disconnect drops it.
+type keptAuth struct {
+	// For: the connector and the person's options it was made under; any
+	// change (an admin's edit, a switched option) asks the provider again.
+	For      string              `json:"for"`
+	Header   map[string][]string `json:"header"`
+	UntilMs  int64               `json:"untilMs"`
+	AtMs     int64               `json:"atMs"`
+	Session  bool                `json:"session,omitempty"`
+	SignEach bool                `json:"signEach,omitempty"`
+}
+
+// keptFor names what a kept authorization was made under: the connector
+// as it is and the person's options on it.
+func keptFor(c connector.Connector, g Grant) string {
+	raw, _ := json.Marshal(struct {
+		C connector.Connector
+		O map[string]string
+	}{c, c.Connect.Provider.OptionValues(g.Options)})
+	sum := sha256.Sum256(raw)
+	return hex.EncodeToString(sum[:8])
+}
+
+// keptAuthKey is where a principal's kept authorization of a connector is.
+func keptAuthKey(org, name string) string { return "auth:" + org + ":" + name }
+
+// loadKeptAuth reads a provider authorization kept for p, while it lasts.
+func (s *Service) loadKeptAuth(ctx context.Context, p principal, org string, c connector.Connector, g Grant) (cachedAuth, bool) {
+	var ka keptAuth
+	ok, err := s.P.GetJSON(ctx, p.scope(org), keptAuthKey(org, c.Name)+p.keySuffix(), &ka)
+	if err != nil || !ok || ka.For != keptFor(c, g) || !s.now().Before(time.UnixMilli(ka.UntilMs)) {
+		return cachedAuth{}, false
+	}
+	return cachedAuth{header: http.Header(ka.Header), until: time.UnixMilli(ka.UntilMs), at: time.UnixMilli(ka.AtMs), session: ka.Session, signEach: ka.SignEach}, true
+}
+
+// storeKeptAuth keeps a provider authorization for p until it ends.
+func (s *Service) storeKeptAuth(ctx context.Context, p principal, org string, c connector.Connector, g Grant, a cachedAuth) {
+	ka := keptAuth{For: keptFor(c, g), Header: a.header, UntilMs: a.until.UnixMilli(), AtMs: a.at.UnixMilli(), Session: a.session, SignEach: a.signEach}
+	if err := s.P.PutJSON(ctx, p.scope(org), keptAuthKey(org, c.Name)+p.keySuffix(), ka); err != nil {
+		slog.Warn("connections: authorization not kept", "connector", c.Name, "error", err)
+	}
+}
+
+// forgetKeptAuth drops a kept authorization (refused, disconnected).
+func (s *Service) forgetKeptAuth(ctx context.Context, p principal, org, name string) {
+	_ = s.P.Delete(ctx, p.scope(org), keptAuthKey(org, name)+p.keySuffix())
 }
 
 func (s *Service) keepAuth(k grantKey, a cachedAuth) {
@@ -156,6 +214,17 @@ func (s *Service) credentialsWith(ctx context.Context, c connector.Connector, or
 	if a, ok := s.cachedAuthFor(k); ok && (!force || !a.at.Before(start)) {
 		return a, nil
 	}
+	kept := c.Connect.Kind == connector.KindProvider && signedIn == nil
+	if kept && !force {
+		// Kept across a restart: the provider is not asked again.
+		if a, ok := s.loadKeptAuth(ctx, p, org, c, *g); ok {
+			s.keepAuth(k, a)
+			return a, nil
+		}
+	}
+	if kept && force {
+		s.forgetKeptAuth(ctx, p, org, c.Name)
+	}
 	if fresh, ok, err := s.grantOf(ctx, p, org, c.Name); err == nil && ok {
 		*g = fresh
 	}
@@ -202,6 +271,9 @@ func (s *Service) credentialsWith(ctx context.Context, c connector.Connector, or
 	}
 	a.at = s.now()
 	s.keepAuth(k, a)
+	if c.Connect.Kind == connector.KindProvider {
+		s.storeKeptAuth(ctx, p, org, c, *g, a)
+	}
 	return a, nil
 }
 

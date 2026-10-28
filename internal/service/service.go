@@ -44,6 +44,7 @@ type Service struct {
 	workerCache map[string]workerCache
 	tokens      map[grantKey]cachedAuth
 	locks       map[grantKey]*sync.Mutex
+	signingIn   map[grantKey]time.Time
 	limiter     limiter
 	activityQ   activityQueue
 }

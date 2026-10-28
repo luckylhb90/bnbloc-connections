@@ -358,7 +358,9 @@ start of its body); the provider answers `session: true` and the headers
 (a CSRF token read from a step). Every request then carries the held
 session, which never leaves the member's computer; a refused one signs in
 again once. A connector sending from the server cannot use a session (an
-administrator's item).
+administrator's item). One sign-in per person and system: a request that
+arrives while another's sign-in on the member's computer is under way
+waits for it (up to 45 seconds) instead of starting its own.
 
 A provider whose system wants each request signed with a key the
 provider keeps (an app key's HMAC over the method, path, query and body)
@@ -384,6 +386,7 @@ deprovisioning):
 | `orgs/<org>` | `draft:<name>` | an agent's draft |
 | `orgs/<org>` | `try:<name>` | the admin's last Try it (status, one line, no credential) |
 | `orgs/<org>` | `send:<id>` | a try a computer is sending (minutes) |
+| `members/<member>` (a worker's: `orgs/<org>`, `:worker:<id>`) | `auth:<org>:<connector>` | a provider's authorization of the connection while it lasts (the headers one request carries), so a restart does not sign the person in again; dropped when the system refuses it, on disconnect, or when the connector or the person's options change |
 | `members/<subject>` | `check:<org>:<name>` | the member's last check after connecting |
 | `members/<subject>` | `grant:<org>:<name>` | the connection (refresh token, key or provider grant; the reach) |
 | `members/<subject>` | `held:<id>` | a held change (a day) |

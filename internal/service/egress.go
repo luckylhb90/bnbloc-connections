@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"slices"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"github.com/luckylhb90/bnbloc-connections/connector"
@@ -387,9 +388,20 @@ func (s *Service) memberSend(ctx context.Context, c connector.Connector, org str
 		}
 		force = true
 	}
+	k := grantKey{p.key(), org, c.Name}
+	if signedIn == nil && !force {
+		// Another request is signing in on the member's computer now: wait
+		// for it rather than start a second sign-in (each one may be visible
+		// on the system, as an OAuth authorization).
+		s.awaitSignIn(ctx, k)
+	}
 	auth, err := s.credentialsWith(ctx, c, org, p, g, force, signedIn)
+	if signedIn != nil {
+		s.signInDone(k)
+	}
 	var need *signInNeeded
 	if errors.As(err, &need) {
+		s.signInStarted(k)
 		// A sign-in on the member's computer first (docs/prd/2026-10-28-member-held-sessions.md
 		// in bnbloc): its steps with the principal's session, made afresh.
 		steps := make([]component.EgressStep, 0, len(need.steps))
@@ -539,6 +551,48 @@ func withAppKeyHeader(auth http.Header, in map[string][]string) map[string][]str
 		out[k] = v
 	}
 	return out
+}
+
+// signInWait bounds how long a request waits for another's sign-in on the
+// member's computer before starting its own.
+const signInWait = 45 * time.Second
+
+// signInStarted notes a sign-in under way on the member's computer.
+func (s *Service) signInStarted(k grantKey) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.signingIn == nil {
+		s.signingIn = map[grantKey]time.Time{}
+	}
+	s.signingIn[k] = s.now()
+}
+
+// signInDone ends it (its credentials are cached, or it failed).
+func (s *Service) signInDone(k grantKey) {
+	s.mu.Lock()
+	delete(s.signingIn, k)
+	s.mu.Unlock()
+}
+
+// awaitSignIn waits, while another request's sign-in is under way and
+// recent, for its credentials to be cached.
+func (s *Service) awaitSignIn(ctx context.Context, k grantKey) {
+	for {
+		s.mu.Lock()
+		at, busy := s.signingIn[k]
+		s.mu.Unlock()
+		if !busy || s.now().Sub(at) > signInWait {
+			return
+		}
+		if _, ok := s.cachedAuthFor(k); ok {
+			return
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(250 * time.Millisecond):
+		}
+	}
 }
 
 // signInReport reports the answers of a sign-in's steps only (StepsOnly):

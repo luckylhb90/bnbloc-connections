@@ -388,6 +388,7 @@ func (s *Service) connectTo(ctx context.Context, m component.Member, name, reach
 	connected := func(g Grant) connectResult {
 		// A new credential replaces the one requests carried so far.
 		s.dropAuth(grantKey{m.Subject, m.Org, c.Name})
+		s.forgetKeptAuth(ctx, asMember(m.Subject), m.Org, c.Name)
 		if err := s.saveGrant(ctx, m.Subject, m.Org, g); err != nil {
 			return connectResult{msg: "The connection could not be kept: " + err.Error(), err: true}
 		}
@@ -495,6 +496,7 @@ func (s *Service) setOption(w http.ResponseWriter, ctx context.Context, m compon
 		g.Options = map[string]string{}
 	}
 	g.Options[key] = strconv.FormatBool(value == "true")
+	s.dropAuth(grantKey{m.Subject, m.Org, name})
 	if err := s.saveGrant(ctx, m.Subject, m.Org, g); err != nil {
 		back(w, m, "Not saved: "+err.Error(), true)
 		return
