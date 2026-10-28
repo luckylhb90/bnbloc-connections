@@ -350,7 +350,7 @@ func (s *Service) memberSend(ctx context.Context, c connector.Connector, org str
 		// The sign-in's answers, from the member's computer: the provider
 		// makes the request's credentials from them.
 		for _, st := range in.Report.Steps {
-			signedIn = append(signedIn, provider.Step{Method: http.MethodGet, URL: st.URL, Status: st.Status, Location: st.Location, Body: st.Body})
+			signedIn = append(signedIn, provider.Step{URL: st.URL, Status: st.Status, Location: st.Location, Body: st.Body})
 		}
 		force = true
 	}
@@ -361,7 +361,7 @@ func (s *Service) memberSend(ctx context.Context, c connector.Connector, org str
 		// in bnbloc): its steps with the principal's session, made afresh.
 		steps := make([]component.EgressStep, 0, len(need.steps))
 		for _, st := range need.steps {
-			steps = append(steps, component.EgressStep{Method: firstNonEmpty(st.Method, http.MethodGet), URL: st.URL})
+			steps = append(steps, component.EgressStep{Method: firstNonEmpty(st.Method, http.MethodGet), URL: st.URL, Header: st.Header, Body: st.Form})
 		}
 		return &component.EgressSend{Session: sessionName(p), Steps: steps, StepsOnly: true, EndSession: true}, cachedAuth{}, nil
 	}

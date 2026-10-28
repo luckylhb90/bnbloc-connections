@@ -41,7 +41,7 @@ func TestSignInOnTheMembersComputer(t *testing.T) {
 			case len(c.SignedIn) == 2 && strings.Contains(string(c.SignedIn[1].Body), `"T1"`):
 				a = provider.Answer{Session: true, Header: map[string]string{"X-CSRF-TOKEN": "T1"}, ExpiresAtMs: time.Now().Add(time.Hour).UnixMilli()}
 			default:
-				a = provider.Answer{SignIn: []provider.Step{{URL: "https://example.com/signin?code=C"}, {URL: "https://example.com/config"}}}
+				a = provider.Answer{SignIn: []provider.Step{{Method: "POST", URL: "https://example.com/signin/acs", Header: map[string]string{"Content-Type": "application/x-www-form-urlencoded"}, Form: []byte("assertion=A")}, {URL: "https://example.com/config"}}}
 			}
 		}
 		_ = json.NewEncoder(w).Encode(a)
@@ -56,11 +56,12 @@ func TestSignInOnTheMembersComputer(t *testing.T) {
 
 	in := component.EgressRequest{Method: "GET", URL: "https://example.com/api/apps"}
 	out, _ := fx.egress(component.DriveOwn, in.Method, in.URL, "", nil)
-	if out.Send == nil || !out.Send.StepsOnly || !out.Send.EndSession || len(out.Send.Steps) != 2 || out.Send.Session != "connections:maya" || out.Send.Steps[0].Method != "GET" {
+	if out.Send == nil || !out.Send.StepsOnly || !out.Send.EndSession || len(out.Send.Steps) != 2 || out.Send.Session != "connections:maya" ||
+		out.Send.Steps[0].Method != "POST" || string(out.Send.Steps[0].Body) != "assertion=A" || out.Send.Steps[0].Header["Content-Type"] == "" || out.Send.Steps[1].Method != "GET" {
 		t.Fatalf("first answer = %+v", out.Send)
 	}
 	in.Report = &component.EgressReport{Steps: []component.EgressStepReport{
-		{URL: "https://example.com/signin?code=C", Status: 303},
+		{URL: "https://example.com/signin/acs", Status: 303},
 		{URL: "https://example.com/config", Status: 200, Body: []byte(`csrf="T1"`)},
 	}}
 	out = fx.egressIn("room-1", in)

@@ -69,14 +69,17 @@ type Call struct {
 }
 
 // Step is one sign-in request a member's computer sends with their held
-// session (Answer.SignIn), and its answer (Call.SignedIn): Status,
-// Location and the start of Body.
+// session (Answer.SignIn: Method, URL, and for a POST its Header and
+// Form), and its answer (Call.SignedIn): Status, Location and the start
+// of Body.
 type Step struct {
-	Method   string `json:"method"`
-	URL      string `json:"url"`
-	Status   int    `json:"status,omitempty"`
-	Location string `json:"location,omitempty"`
-	Body     []byte `json:"body,omitempty"`
+	Method   string            `json:"method"`
+	URL      string            `json:"url"`
+	Header   map[string]string `json:"header,omitempty"`
+	Form     []byte            `json:"form,omitempty"`
+	Status   int               `json:"status,omitempty"`
+	Location string            `json:"location,omitempty"`
+	Body     []byte            `json:"body,omitempty"`
 }
 
 // Principal is who a call signs in as: a member (Kind PrincipalMember, ID
@@ -127,7 +130,8 @@ type Answer struct {
 	// held on their own computer for this connector's host
 	// (docs/prd/2026-10-28-member-held-sessions.md in bnbloc), beside
 	// Header; only on a connector that sends from members' computers.
-	// SignIn: the steps (GET, the connector's host) their computer sends
+	// SignIn: the steps (GET, or a POST of a form, to the connector's
+	// host) their computer sends
 	// with that session first, fresh; connections then asks authorize
 	// again with Call.SignedIn.
 	Session bool   `json:"session,omitempty"`
