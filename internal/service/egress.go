@@ -14,6 +14,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/luckylhb90/bnbloc-connections/connector"
+	"github.com/luckylhb90/bnbloc-connections/internal/platform"
 	"github.com/luckylhb90/bnbloc/component"
 )
 
@@ -250,6 +251,9 @@ func (s *Service) failed(ctx context.Context, t component.Turn, p principal, c c
 			&component.Audit{Action: "request", Target: c.Name + " " + target, Outcome: "deny", Detail: "reconnect" + asDetail(p)}
 	case errors.Is(err, errReconnect):
 		s.record(ctx, t, p, c, in.Method, u.Path, 0, "reconnect")
+		// The member's Connections page says the connection no longer works.
+		_ = s.P.PutJSON(ctx, platform.Member(p.Member), checkPrefix+t.Org+":"+c.Name,
+			tryResult{Hash: reviewHash(c), AtMs: s.now().UnixMilli(), Line: target + ": the system refused the credentials (401, or a sign-in it no longer takes)"})
 		return refusal(http.StatusForbidden, "the connection to "+c.DisplayName+" no longer works: "+t.Requester+" was asked in the room to connect it again",
 				connectCard(c, in.Method, u.Path, true, nil), map[string]any{"system": c.Name, "connected": false}),
 			&component.Audit{Action: "request", Target: c.Name + " " + target, Outcome: "deny", Detail: "reconnect"}

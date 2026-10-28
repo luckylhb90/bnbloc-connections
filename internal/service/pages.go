@@ -106,8 +106,10 @@ type systemRow struct {
 	// chose to act as ("": themselves).
 	Workers []Worker
 	Chosen  string
-	// Check is the last check of the member's connection ("": none).
-	Check string
+	// Check is the last check of the member's connection ("": none);
+	// CheckFailed: the system did not take it.
+	Check       string
+	CheckFailed bool
 	// Options are a connected provider connector's member options, as set.
 	Options []optionRow
 	// Waiting: the connection waits for the member's consent at Open
@@ -221,7 +223,7 @@ func (s *Service) connectionsPage(w http.ResponseWriter, r *http.Request, m comp
 		row := systemRow{SystemView: v, Kind: c.Connect.Kind, Highlight: q.Get("system") == v.Name, Workers: ws, Chosen: s.choice(ctx, m.Subject, m.Org, c.Name), Base: m.PageURL,
 			Internal: c.Internal, Examples: c.Examples}
 		if t, ok := s.lastCheck(ctx, m.Subject, m.Org, c.Name); ok && v.Connected {
-			row.Check = t.View(s.now())
+			row.Check, row.CheckFailed = t.View(s.now()), !t.OK && !t.Waiting(s.now())
 			if t.Waiting(s.now()) {
 				live = append(live, c.Name+":check")
 			}
@@ -350,6 +352,8 @@ func (s *Service) connectTo(ctx context.Context, m component.Member, name, reach
 		reach = connector.Read
 	}
 	connected := func(g Grant) connectResult {
+		// A new credential replaces the one requests carried so far.
+		s.dropAuth(grantKey{m.Subject, m.Org, c.Name})
 		if err := s.saveGrant(ctx, m.Subject, m.Org, g); err != nil {
 			return connectResult{msg: "The connection could not be kept: " + err.Error(), err: true}
 		}

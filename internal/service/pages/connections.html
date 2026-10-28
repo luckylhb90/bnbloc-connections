@@ -91,13 +91,14 @@
     <div class="mono-av" data-mono="{{.DisplayName}}" aria-hidden="true"></div>
     <div class="item-main">
       <div class="item-title"><strong>{{.DisplayName}}</strong>
-        {{if .Connected}}<span class="status ok">Connected</span>{{else if .Waiting}}<span class="status warn">Waiting for you</span>{{else}}<span class="status">Not connected</span>{{end}}
+        {{if and .Connected .CheckFailed}}<span class="status bad">Not working</span>{{else if .Connected}}<span class="status ok">Connected</span>{{else if .Waiting}}<span class="status warn">Waiting for you</span>{{else}}<span class="status">Not connected</span>{{end}}
       </div>
       {{if .Purpose}}<div class="item-desc">{{.Purpose}}</div>{{end}}
       <div class="meta">{{range .Hosts}}<span class="chip mono">{{.}}</span>{{end}}{{if .As}}<span class="chip">as {{.As}} (a digital worker)</span>{{end}}</div>
     </div>
     <div class="item-actions">
     {{if .Connected}}
+      {{if and .CheckFailed (eq .Kind "apiKey")}}<button type="button" class="primary" data-reveal="key-{{.Name}}" aria-expanded="false">Replace the key</button>{{end}}
     {{else if .Waiting}}
     {{else if eq .Kind "apiKey"}}
       <button type="button" class="primary" data-reveal="key-{{.Name}}" aria-expanded="{{if .Highlight}}true{{else}}false{{end}}">Connect</button>
@@ -127,9 +128,9 @@
   </div>
   {{end}}
 
-  {{if and (not .Connected) (eq .Kind "apiKey")}}
-  <form id="key-{{.Name}}" class="block reveal" method="post" action="{{.Base}}connect"{{if not .Highlight}} hidden{{end}}>
-    <input type="hidden" name="system" value="{{.Name}}"><input type="hidden" name="reach" value="read">
+  {{if and (eq .Kind "apiKey") (or (not .Connected) .CheckFailed)}}
+  <form id="key-{{.Name}}" class="block reveal" method="post" action="{{.Base}}connect"{{if or .Connected (not .Highlight)}} hidden{{end}}>
+    <input type="hidden" name="system" value="{{.Name}}"><input type="hidden" name="reach" value="{{if eq .Changes "allowed"}}write{{else}}read{{end}}">
     {{if .Help}}<p class="muted" style="margin:0 0 4px">{{.Help}}</p>{{end}}
     <div class="form-grid">
       <div{{if not .Signs}} class="wide"{{end}}><label for="key-in-{{.Name}}">{{if .Signs}}API key{{else}}Key{{end}}</label>
@@ -143,7 +144,8 @@
   </form>
   {{else if and (not .Connected) (not .Waiting) .Help}}<p class="subtle" style="margin:12px 0 0 54px">{{.Help}}</p>{{end}}
 
-  {{if .Check}}<div class="subtle" style="margin:10px 0 0 54px">Last check: {{.Check}}</div>{{end}}
+  {{if .CheckFailed}}<div class="callout bad" style="margin-left:54px"><div class="grow"><strong>{{.DisplayName}} does not take your connection</strong><div class="muted">Last check: {{.Check}}. {{if eq .Kind "apiKey"}}Make a new key and replace this one.{{else}}Disconnect and connect again.{{end}}</div></div></div>
+  {{else if .Check}}<div class="subtle" style="margin:10px 0 0 54px">Last check: {{.Check}}</div>{{end}}
 
   {{if or .Connected .Workers}}
   <div class="item-foot">

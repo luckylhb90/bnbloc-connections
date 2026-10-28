@@ -205,3 +205,29 @@ func TestTryFromTheMembersComputer(t *testing.T) {
 		t.Fatalf("the member's page after the check = %s", page)
 	}
 }
+
+// A system that refuses a credential with a 200 (expiredWhen names its
+// body) fails the member's check: the page says the connection does not
+// work and offers to replace the key, never "it works".
+func TestCheckRefusedWithA200(t *testing.T) {
+	fx := newFixture(t)
+	c := issues()
+	c.SendFrom = connector.SendMember
+	c.Test = &connector.Test{Path: "/api/me"}
+	c.ExpiredWhen = []connector.Expired{{Status: 200, BodyContains: `"code":401`}}
+	fx.addConnector(c)
+	fx.store.computer = true
+	_ = fx.pageAct(false, "/pages/connections/connect", url.Values{"system": {"issues"}, "key": {"KEY-123456"}})
+	in := component.EgressRequest{Method: "GET", URL: "https://example.com/api/me"}
+	_ = fx.sendExchange("send-1", in)
+	for attempt := 1; attempt <= component.MaxEgressSends; attempt++ {
+		in.Report = &component.EgressReport{Attempt: attempt, Status: 200, Body: []byte(`{"code":401,"message":"please login first"}`)}
+		if out := fx.sendExchange("send-1", in); out.Accept {
+			break
+		}
+	}
+	page := fx.page(false, http.MethodGet, "/pages/connections/", nil).Body.String()
+	if strings.Contains(page, "it works") || !strings.Contains(page, "Not working") || !strings.Contains(page, "Replace the key") || !strings.Contains(page, "refused the credentials") {
+		t.Fatalf("the member's page after a refused check = %s", page)
+	}
+}

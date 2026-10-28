@@ -194,6 +194,10 @@ func (s *Service) handleSendEgress(w http.ResponseWriter, r *http.Request, sd co
 		if !refused || rep.Attempt >= component.MaxEgressSends {
 			auth, _ := s.credentials(ctx, c, sd.Org, p, &g, false)
 			t := answered(tryResult{Hash: ps.Hash, AtMs: s.now().UnixMilli()}, in.Method, u.RequestURI(), rep.Status, rep.Body)
+			if refused {
+				// A refusal the connector names (expiredWhen) may come as a 200.
+				t.OK, t.Line = false, in.Method+" "+u.RequestURI()+": the system refused the credentials (401, or a sign-in it no longer takes)"
+			}
 			t.Line = redact(t.Line, auth, g)
 			s.finishTry(w, ctx, sd.Org, sd.ID, ps, c, t)
 			writeJSON(w, http.StatusOK, component.EgressResponse{Accept: true})
