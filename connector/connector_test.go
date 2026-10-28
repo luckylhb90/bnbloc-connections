@@ -2,6 +2,7 @@ package connector
 
 import (
 	"net/url"
+	"strings"
 	"testing"
 )
 
@@ -107,24 +108,30 @@ func TestCheckPathRefusesAmbiguousPaths(t *testing.T) {
 	}
 }
 
-// agentAuthorization lets the agent's Authorization through, only on a
-// provider connector; Cookie and Proxy-Authorization are still removed.
-func TestAgentAuthorization(t *testing.T) {
+// appKeys: only beside the person's sign-in (never a key connector), and
+// the agent's app header and the key's header are removed from what it sends.
+func TestAppKeys(t *testing.T) {
 	c := sample()
-	c.AgentAuthorization = true
+	c.AppKeys = &AppKeys{Header: "X-App", In: "bearer"}
 	if c.Validate() == nil {
-		t.Fatal("agentAuthorization on a key connector passes")
+		t.Fatal("appKeys on a key connector passes")
 	}
 	c.Connect = Connect{Kind: KindProvider, Provider: &Provider{URL: "https://provider.example.com", App: "app"}}
 	if err := c.Validate(); err != nil {
 		t.Fatal(err)
 	}
-	for _, h := range c.CredentialHeaders() {
-		if h == "Authorization" {
-			t.Fatal("Authorization is still removed")
+	for _, bad := range []AppKeys{{Header: "Authorization", In: "bearer"}, {Header: "X-App", In: "query"}, {Header: "X-App", In: "header"}} {
+		c.AppKeys = &bad
+		if c.Validate() == nil {
+			t.Errorf("appKeys %+v passes", bad)
 		}
 	}
-	if hs := c.CredentialHeaders(); len(hs) != 2 || hs[0] != "Cookie" {
-		t.Fatalf("removed = %v", hs)
+	c.AppKeys = &AppKeys{Header: "X-App", In: "header", Name: "X-Key"}
+	hs := strings.Join(c.CredentialHeaders(), ",")
+	if !strings.Contains(hs, "X-App") || !strings.Contains(hs, "X-Key") || !strings.Contains(hs, "Authorization") {
+		t.Fatalf("removed = %s", hs)
+	}
+	if !ValidAppKeyName("Reports bot") || ValidAppKeyName("") || ValidAppKeyName("a/b") {
+		t.Fatal("app names")
 	}
 }

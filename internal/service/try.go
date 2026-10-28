@@ -262,6 +262,9 @@ func redact(line string, auth cachedAuth, g Grant) string {
 	for _, v := range g.Extra {
 		secrets = append(secrets, v)
 	}
+	for _, v := range g.AppKeys {
+		secrets = append(secrets, v)
+	}
 	for _, v := range secrets {
 		if len(v) >= 6 {
 			line = strings.ReplaceAll(line, v, "[credential]")

@@ -35,7 +35,10 @@ type Grant struct {
 	ProviderGrant string            `json:"providerGrant,omitempty"`
 	// Options: the member's choices on a provider connector's options
 	// (connector.ProviderOption), "true" or "false".
-	Options       map[string]string `json:"options,omitempty"`
+	Options map[string]string `json:"options,omitempty"`
+	// AppKeys: the member's app keys on a connector with appKeys, by the
+	// name they gave each (the agent names one; it never sees a key).
+	AppKeys       map[string]string `json:"appKeys,omitempty"`
 	ConnectedAtMs int64             `json:"connectedAtMs"`
 }
 

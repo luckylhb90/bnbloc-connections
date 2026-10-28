@@ -66,16 +66,37 @@ type Connector struct {
 	// not reach). Either way the credentials and the policy are this
 	// component's.
 	SendFrom string `json:"sendFrom,omitempty"`
-	// AgentAuthorization: the agent's own Authorization header goes through
-	// (a system whose API takes a key the person gives the agent, behind a
-	// gateway the connection signs in to with other headers). Only on a
-	// provider connector; a credential the connection sets in Authorization
-	// still replaces it.
-	AgentAuthorization bool `json:"agentAuthorization,omitempty"`
+	// AppKeys: the system's API takes a key per app on top of the person's
+	// sign-in (an app platform's app keys). The member keeps their apps'
+	// keys on their connection, each by a name; the agent names the app in
+	// the Header and never sees a key.
+	AppKeys *AppKeys `json:"appKeys,omitempty"`
 	// Enabled: the organization's members may connect it and their agents
 	// reach it.
 	Enabled bool `json:"enabled,omitempty"`
 }
+
+// AppKeys is how an agent names one of the member's app keys, and how the
+// key rides: Header (the agent's request header naming the app, removed
+// before sending) and the key set in In, Name, after Prefix (as APIKey).
+type AppKeys struct {
+	Header string `json:"header"`
+	In     string `json:"in"`
+	Name   string `json:"name,omitempty"`
+	Prefix string `json:"prefix,omitempty"`
+	// Label names what a key is on the Connections page ("App key").
+	Label string `json:"label,omitempty"`
+	Help  string `json:"help,omitempty"`
+}
+
+// MaxAppKeys bounds the app keys a member keeps on one connection.
+const MaxAppKeys = 32
+
+// appKeyName is the name a member gives an app key.
+var appKeyName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9 ._-]{0,47}$`)
+
+// ValidAppKeyName reports a name a member may give an app key.
+func ValidAppKeyName(n string) bool { return appKeyName.MatchString(n) }
 
 // Where requests go out (Connector.SendFrom).
 const (
@@ -367,8 +388,19 @@ func (c Connector) Validate() error {
 			return fmt.Errorf("host %q: an exact lower-case DNS name (no port, no address, no wildcard)", h)
 		}
 	}
-	if c.AgentAuthorization && c.Connect.Kind != KindProvider {
-		return errors.New("agentAuthorization: only on a provider connector (a key or a token of the connection's own rides in Authorization)")
+	if k := c.AppKeys; k != nil {
+		if c.Connect.Kind == KindAPIKey {
+			return errors.New("appKeys: not on a key connector (its key already rides in the request)")
+		}
+		if !headerName(k.Header) || reservedHeader(k.Header) {
+			return errors.New("appKeys.header: the header the agent names the app in")
+		}
+		if k.In != "bearer" && k.In != "header" {
+			return errors.New(`appKeys.in: "bearer" or "header" (with name)`)
+		}
+		if k.In == "header" && (!headerName(k.Name) || reservedHeader(k.Name)) {
+			return errors.New("appKeys.name: the header the key goes in")
+		}
 	}
 	if c.SendFrom != "" && c.SendFrom != SendServer && c.SendFrom != SendMember {
 		return errors.New(`sendFrom: "server" (default) or "member"`)
@@ -786,8 +818,11 @@ func (c Connector) IsExpired(status int, location string, body []byte) bool {
 // one is removed from what an agent sends.
 func (c Connector) CredentialHeaders() []string {
 	out := []string{"Authorization", "Cookie", "Proxy-Authorization"}
-	if c.AgentAuthorization {
-		out = out[1:]
+	if k := c.AppKeys; k != nil {
+		out = append(out, k.Header)
+		if k.In == "header" {
+			out = append(out, k.Name)
+		}
 	}
 	if a := c.Connect.APIKey; a != nil {
 		if a.In == "header" {

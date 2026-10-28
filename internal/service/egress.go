@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"slices"
 	"strings"
 	"unicode/utf8"
 
@@ -120,6 +121,9 @@ func (s *Service) serve(ctx context.Context, t component.Turn, in component.Egre
 		return refusal(http.StatusForbidden, host+" is not a system your organization enabled", nil, nil), nil
 	}
 	target := in.Method + " " + u.Path
+	// The app key's internal header is the component's alone: an agent's
+	// copy is dropped before anything reads the request.
+	in.Header = withAppKey(in.Header, nil)
 	if in.Report == nil && !s.limiter.allow(t.Requester+"\n"+c.Name, s.now()) {
 		return refusal(http.StatusTooManyRequests, "too many requests to "+c.DisplayName+" for now; slow down", nil, nil),
 			&component.Audit{Action: "request", Target: c.Name + " " + target, Outcome: "deny", Detail: "rate"}
@@ -161,6 +165,12 @@ func (s *Service) serve(ctx context.Context, t component.Turn, in component.Egre
 				&component.Audit{Action: "request", Target: c.Name + " " + target, Outcome: "deny", Detail: "streamed body"}
 		}
 	}
+	appKey, why := appKeyFor(c, g, in)
+	if why != "" {
+		s.record(ctx, t, p, c, in.Method, u.Path, 0, "refused")
+		return refusal(http.StatusForbidden, why, nil, nil),
+			&component.Audit{Action: "request", Target: c.Name + " " + target, Outcome: "deny", Detail: "app key"}
+	}
 	class := c.Classify(in.Method, u.Path, in.Body)
 	switch {
 	case class == "":
@@ -183,6 +193,9 @@ func (s *Service) serve(ctx context.Context, t component.Turn, in component.Egre
 	underRoom := ""
 	if class == connector.Write && g.Reach != connector.Write && in.Report == nil && mayRoomAllow(t, p) && s.roomAllows(ctx, t.Requester, t.Org, t.Room, c.Name) {
 		underRoom = ", room allowance"
+	}
+	if appKey != nil {
+		in.Header = withAppKey(in.Header, appKey)
 	}
 	if c.FromMember() {
 		resp, a := s.fromMember(ctx, t, p, c, &g, in, u, class)
@@ -368,7 +381,7 @@ func (s *Service) memberSend(ctx context.Context, c connector.Connector, org str
 	if err != nil {
 		return nil, cachedAuth{}, err
 	}
-	send := &component.EgressSend{Remove: c.CredentialHeaders(), Header: auth.header, Query: auth.query}
+	send := &component.EgressSend{Remove: append(c.CredentialHeaders(), appKeyHeaders(in.Header)...), Header: withAppKeyHeader(auth.header, in.Header), Query: auth.query}
 	if auth.session {
 		send.Session = sessionName(p)
 	}
@@ -394,6 +407,97 @@ func (s *Service) memberSend(ctx context.Context, c connector.Connector, org str
 		}
 	}
 	return send, auth, nil
+}
+
+// appKeyHeader carries an app key from serve to the send, under a name no
+// agent can set (every header the agent sent is checked first).
+const appKeyHeader = "X-Bnbloc-App-Key-"
+
+// appKeyFor is the app key the agent's request names (nil: the connector
+// has none, or the request names none), or why it is refused: a name the
+// member has not added. The agent's own header carrying the key's name is
+// never trusted for anything else.
+func appKeyFor(c connector.Connector, g Grant, in component.EgressRequest) (http.Header, string) {
+	k := c.AppKeys
+	if k == nil {
+		return nil, ""
+	}
+	name := strings.TrimSpace(headerValue(in.Header, k.Header))
+	if name == "" {
+		return nil, ""
+	}
+	key, ok := g.AppKeys[name]
+	if !ok {
+		names := make([]string, 0, len(g.AppKeys))
+		for n := range g.AppKeys {
+			names = append(names, n)
+		}
+		slices.Sort(names)
+		known := "none yet"
+		if len(names) > 0 {
+			known = strings.Join(names, ", ")
+		}
+		return nil, fmt.Sprintf("no %s app named %q on this connection (the person's apps: %s); the person adds an app and its key on the Connections page", c.DisplayName, name, known)
+	}
+	out := http.Header{}
+	if k.In == "bearer" {
+		out.Set("Authorization", "Bearer "+key)
+	} else {
+		out.Set(k.Name, k.Prefix+key)
+	}
+	return out, ""
+}
+
+// withAppKey returns the agent's headers with the app key added under
+// appKeyHeader (the send moves it to its real name).
+func withAppKey(h map[string][]string, key http.Header) map[string][]string {
+	out := make(map[string][]string, len(h)+1)
+	for k, v := range h {
+		if !strings.HasPrefix(http.CanonicalHeaderKey(k), appKeyHeader) {
+			out[k] = v
+		}
+	}
+	for k, v := range key {
+		out[appKeyHeader+k] = v
+	}
+	return out
+}
+
+// appKeyHeaders are the app key's internal names on a request (removed
+// before the bridge sends it: the send sets the real one).
+func appKeyHeaders(in map[string][]string) []string {
+	var out []string
+	for k := range in {
+		if strings.HasPrefix(http.CanonicalHeaderKey(k), appKeyHeader) {
+			out = append(out, k)
+		}
+	}
+	return out
+}
+
+// withAppKeyHeader is a send's headers: the connection's, then the app key
+// the request carries (it wins: the system reads the app from it).
+func withAppKeyHeader(auth http.Header, in map[string][]string) map[string][]string {
+	var key http.Header
+	for k, v := range in {
+		if name, ok := strings.CutPrefix(http.CanonicalHeaderKey(k), appKeyHeader); ok {
+			if key == nil {
+				key = http.Header{}
+			}
+			key[http.CanonicalHeaderKey(name)] = v
+		}
+	}
+	if key == nil {
+		return auth
+	}
+	out := make(map[string][]string, len(auth)+len(key))
+	for k, v := range auth {
+		out[k] = v
+	}
+	for k, v := range key {
+		out[k] = v
+	}
+	return out
 }
 
 // signInReport reports the answers of a sign-in's steps only (StepsOnly):
@@ -431,13 +535,15 @@ func (s *Service) call(ctx context.Context, c connector.Connector, org string, p
 			return component.EgressResponse{}, err
 		}
 		for k, v := range in.Header {
-			req.Header[http.CanonicalHeaderKey(k)] = v
+			if !strings.HasPrefix(http.CanonicalHeaderKey(k), appKeyHeader) {
+				req.Header[http.CanonicalHeaderKey(k)] = v
+			}
 		}
 		for _, h := range c.CredentialHeaders() {
 			req.Header.Del(h)
 		}
 		req.Header.Del("Content-Length")
-		for k, v := range auth.header {
+		for k, v := range withAppKeyHeader(auth.header, in.Header) {
 			req.Header[k] = v
 		}
 		for k, v := range signHeaders {

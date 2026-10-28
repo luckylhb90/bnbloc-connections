@@ -60,6 +60,11 @@ func (s *Service) facts(ctx context.Context, t component.Turn, systems []SystemV
 			continue
 		}
 		g := guide(c)
+		for _, v := range systems {
+			if v.Name == c.Name && c.AppKeys != nil {
+				g += appsNote(c, v.Apps)
+			}
+		}
 		if len(g) > budget || len(files) >= component.MaxFactsFiles-1 {
 			continue
 		}
@@ -102,6 +107,18 @@ func guide(c connector.Connector) string {
 		b.WriteString(strings.TrimSpace(c.Guide))
 		b.WriteString("\n")
 	}
+	return b.String()
+}
+
+// appsNote tells the agent how to name one of the person's apps there.
+func appsNote(c connector.Connector, apps []string) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "\n## Apps\n\nName the app in the `%s` header; bnbloc adds its key (you never see or send one).", c.AppKeys.Header)
+	if len(apps) == 0 {
+		b.WriteString(" The person has added no app yet: ask them to add one (its name and key) on the Connections page; never ask for the key in the conversation.\n")
+		return b.String()
+	}
+	fmt.Fprintf(&b, " The person's apps: %s. An app they have not added is refused: ask them to add it on the Connections page, never for its key.\n", strings.Join(apps, ", "))
 	return b.String()
 }
 

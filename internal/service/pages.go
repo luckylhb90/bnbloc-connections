@@ -5,6 +5,7 @@ import (
 	"embed"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"html/template"
 	"log/slog"
 	"net/http"
@@ -127,6 +128,10 @@ type systemRow struct {
 	OpenWith string // connector.Provider.OpenWith, space-separated
 	// Base is the page's address, for the row's forms.
 	Base string
+	// AppKeys: the connector takes app keys (its label); Apps: the names
+	// of the member's keys on it (never a key).
+	AppKeys *connector.AppKeys
+	Apps    []string
 	// Internal and Examples: the connector's (connector.Connector).
 	Internal bool
 	Examples []string
@@ -184,6 +189,12 @@ func (s *Service) connectionsPage(w http.ResponseWriter, r *http.Request, m comp
 	case "option":
 		s.setOption(w, ctx, m, form.Get("system"), form.Get("key"), form.Get("value"))
 		return
+	case "appkey":
+		s.setAppKey(w, ctx, m, form.Get("system"), strings.TrimSpace(form.Get("app")), strings.TrimSpace(form.Get("key")))
+		return
+	case "appkeydelete":
+		s.setAppKey(w, ctx, m, form.Get("system"), strings.TrimSpace(form.Get("app")), "")
+		return
 	case "actas", "roomidentity", "myidentity":
 		// Who agents act as: everywhere (actas), for everyone in this room
 		// (roomidentity, its owner) or for the member in this room.
@@ -234,7 +245,7 @@ func (s *Service) connectionsPage(w http.ResponseWriter, r *http.Request, m comp
 	for i, v := range systems {
 		c := list[i]
 		row := systemRow{SystemView: v, Kind: c.Connect.Kind, Highlight: q.Get("system") == v.Name, Workers: ws, Chosen: s.choice(ctx, m.Subject, m.Org, c.Name), Base: m.PageURL,
-			Internal: c.Internal, Examples: c.Examples}
+			Internal: c.Internal, Examples: c.Examples, AppKeys: c.AppKeys}
 		if t, ok := s.lastCheck(ctx, m.Subject, m.Org, c.Name); ok && v.Connected {
 			row.Check, row.CheckFailed = t.View(s.now()), !t.OK && !t.Waiting(s.now())
 			if t.Waiting(s.now()) {
@@ -252,6 +263,7 @@ func (s *Service) connectionsPage(w http.ResponseWriter, r *http.Request, m comp
 			}
 			if v.Connected {
 				g, _, _ := s.grant(ctx, m.Subject, m.Org, c.Name)
+				row.Apps = appNames(g)
 				vals := c.Connect.Provider.OptionValues(g.Options)
 				for _, o := range c.Connect.Provider.Options {
 					row.Options = append(row.Options, optionRow{Key: o.Key, Label: o.Label, On: vals[o.Key] == "true"})
@@ -489,6 +501,64 @@ func (s *Service) setOption(w http.ResponseWriter, ctx context.Context, m compon
 	}
 	audit(w, component.Audit{Action: "option", Target: name, Outcome: "ok", Detail: key + "=" + g.Options[key]})
 	back(w, m, c.DisplayName+": saved.", false)
+}
+
+// appNames are the names of a grant's app keys, sorted.
+func appNames(g Grant) []string {
+	out := make([]string, 0, len(g.AppKeys))
+	for n := range g.AppKeys {
+		out = append(out, n)
+	}
+	slices.Sort(out)
+	return out
+}
+
+// setAppKey adds or replaces one of the member's app keys on their
+// connection to a connector with appKeys (key ""; removes it). The key is
+// kept sealed with the connection and never shown again.
+func (s *Service) setAppKey(w http.ResponseWriter, ctx context.Context, m component.Member, name, app, key string) {
+	g, ok, err := s.grant(ctx, m.Subject, m.Org, name)
+	if err != nil || !ok {
+		back(w, m, "Connect that system first.", true)
+		return
+	}
+	c, found := s.connectorNamed(ctx, m.Org, name)
+	if !found || c.AppKeys == nil {
+		back(w, m, "That system takes no app keys.", true)
+		return
+	}
+	if !connector.ValidAppKeyName(app) {
+		back(w, m, "An app's name: letters, digits, spaces, '.', '_' or '-', at most 48.", true)
+		return
+	}
+	action, msg := "appkey-set", c.DisplayName+": "+app+" saved. Ask your agent to use the app "+app+"."
+	switch {
+	case key == "":
+		if _, ok := g.AppKeys[app]; !ok {
+			back(w, m, "No app named "+app+".", true)
+			return
+		}
+		delete(g.AppKeys, app)
+		action, msg = "appkey-delete", c.DisplayName+": "+app+" removed."
+	case len(key) > 512 || strings.ContainsAny(key, "\r\n "):
+		back(w, m, "That does not look like a key.", true)
+		return
+	default:
+		if g.AppKeys == nil {
+			g.AppKeys = map[string]string{}
+		}
+		if _, exists := g.AppKeys[app]; !exists && len(g.AppKeys) >= connector.MaxAppKeys {
+			back(w, m, fmt.Sprintf("At most %d apps on one connection.", connector.MaxAppKeys), true)
+			return
+		}
+		g.AppKeys[app] = key
+	}
+	if err := s.saveGrant(ctx, m.Subject, m.Org, g); err != nil {
+		back(w, m, "Not saved: "+err.Error(), true)
+		return
+	}
+	audit(w, component.Audit{Action: action, Target: name, Outcome: "ok", Detail: "app " + app})
+	back(w, m, msg, false)
 }
 
 func (s *Service) setReach(w http.ResponseWriter, ctx context.Context, m component.Member, name, reach string) {

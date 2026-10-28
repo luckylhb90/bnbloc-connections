@@ -165,6 +165,26 @@
   {{if .CheckFailed}}<div class="callout bad" style="margin-left:54px"><div class="grow"><strong>{{.DisplayName}} does not take your connection</strong><div class="muted">Last check: {{.Check}}. {{if eq .Kind "apiKey"}}Make a new key and replace this one.{{else}}Disconnect and connect again.{{end}}</div></div></div>
   {{else if .Check}}<div class="subtle" style="margin:10px 0 0 54px">Last check: {{.Check}}</div>{{end}}
 
+  {{if and .Connected .AppKeys}}
+  <div class="callout" style="margin-left:54px">
+    <div class="grow">
+      <strong>{{or .AppKeys.Label "App keys"}}</strong>
+      <div class="muted">{{if .AppKeys.Help}}{{.AppKeys.Help}} {{end}}Kept sealed with your connection; your agent names an app and never sees its key.</div>
+      {{if .Apps}}<div class="meta">{{$sys := .Name}}{{$base := .Base}}{{range .Apps}}
+        <form method="post" action="{{$base}}appkeydelete" data-confirm="Remove the app {{.}}? Your agent can no longer use it."><input type="hidden" name="system" value="{{$sys}}"><input type="hidden" name="app" value="{{.}}"><span class="chip">{{.}} <button class="ghost sm" style="padding:0 4px" aria-label="Remove {{.}}" data-busy="…">×</button></span></form>
+      {{end}}</div>{{else}}<div class="subtle" style="margin-top:6px">No app yet.</div>{{end}}
+      <form class="block" method="post" action="{{.Base}}appkey" style="margin-top:10px">
+        <input type="hidden" name="system" value="{{.Name}}">
+        <div class="form-grid">
+          <div><label for="app-{{.Name}}">App name</label><input id="app-{{.Name}}" type="text" name="app" placeholder="Reports bot" maxlength="48" required autocomplete="off"></div>
+          <div><label for="appkey-{{.Name}}">Key</label><input id="appkey-{{.Name}}" type="password" name="key" required autocomplete="off"></div>
+        </div>
+        <div class="form-actions"><button class="primary sm" data-busy="Saving…">Add the app</button><span class="subtle">Same name replaces its key.</span></div>
+      </form>
+    </div>
+  </div>
+  {{end}}
+
   {{if or .Connected .Workers}}
   <div class="item-foot">
     {{if .Connected}}

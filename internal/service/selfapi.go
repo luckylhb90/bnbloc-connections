@@ -28,6 +28,10 @@ type SystemView struct {
 	Changes string `json:"changes,omitempty"`
 	// As: the digital worker the agent acts as there ("": the person).
 	As string `json:"as,omitempty"`
+	// Apps: the names of the person's app keys there (a connector with
+	// appKeys), which the agent names in AppHeader; never a key.
+	Apps      []string `json:"apps,omitempty"`
+	AppHeader string   `json:"appHeader,omitempty"`
 }
 
 // Draft is a connector an agent drafted, waiting for an admin.
@@ -62,6 +66,9 @@ func (s *Service) systemsFor(ctx context.Context, t component.Turn) ([]SystemVie
 		v := SystemView{Name: c.Name, DisplayName: c.DisplayName, Purpose: c.Purpose, Hosts: c.Hosts}
 		if a, err := s.actingAs(ctx, t, c); err == nil && a.ok {
 			v.Connected, v.Changes, v.As = true, "asked", a.p.as()
+			if c.AppKeys != nil {
+				v.Apps, v.AppHeader = appNames(a.g), c.AppKeys.Header
+			}
 			if a.g.Reach == connector.Write {
 				v.Changes = "allowed"
 			}
