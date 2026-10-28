@@ -62,6 +62,8 @@ and reviews the drafts agents post there.
   "name": "issues",
   "displayName": "Issue tracker",
   "purpose": "Bugs and tasks",
+  "internal": true,
+  "examples": ["List my open issues due this week", "File a bug for the login timeout with these logs"],
   "hosts": ["issues.example.com"],
   "connect": {"kind": "apiKey", "apiKey": {"in": "bearer", "help": "Profile → Tokens"}},
   "policy": {
@@ -75,6 +77,12 @@ and reviews the drafts agents post there.
 }
 ```
 
+- `internal`: the organization's own system rather than an outside
+  service; the Connections page lists company systems and external services
+  apart.
+- `examples`: up to 5 things a member may ask their agent to do there, one
+  line each; the Connections page offers them to copy ("Try asking your
+  agent").
 - `hosts`: exact names; only these are intercepted.
 - `connect.kind`:
   - `oauth2`: authorization code with PKCE; `issuer` (RFC 8414 / OIDC

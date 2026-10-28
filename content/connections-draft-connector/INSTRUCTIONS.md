@@ -21,6 +21,12 @@ Reply with only a JSON object holding exactly these keys:
 - `connector`: the connector, as a JSON object (not a string), with these
   fields:
   - `name` (1-32 of a-z, 0-9, `-`), `displayName`, `purpose` (one line).
+  - `internal`: `true` for the organization's own system (one its people
+    run or use for work, often on its own domain), left out for an outside
+    service.
+  - `examples`: two or three things a member may ask their own agent to
+    do there, in a member's words, one line each ("List my open issues due
+    this week"); only what the policy lets an agent do.
   - `hosts`: the exact API hosts, lower case, no scheme, port or wildcard.
   - `connect`, one kind:
     - `{"kind":"apiKey","apiKey":{"in":"bearer"|"header"|"query"|"basic","name":"<header or query name>","prefix":"","help":"where a member makes a key"}}`;

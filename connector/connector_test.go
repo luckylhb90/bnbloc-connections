@@ -56,8 +56,11 @@ func TestValidateRefuses(t *testing.T) {
 		"http oauth": func(c *Connector) {
 			c.Connect = Connect{Kind: KindOAuth2, OAuth2: &OAuth2{Issuer: "http://idp.example.com"}}
 		},
-		"proxy env":  func(c *Connector) { c.CLIEnv = map[string]string{"HTTPS_PROXY": "x"} },
-		"bad regexp": func(c *Connector) { c.Policy.Read[1].Body = "(" },
+		"proxy env":         func(c *Connector) { c.CLIEnv = map[string]string{"HTTPS_PROXY": "x"} },
+		"bad regexp":        func(c *Connector) { c.Policy.Read[1].Body = "(" },
+		"blank example":     func(c *Connector) { c.Examples = []string{" "} },
+		"two-line example":  func(c *Connector) { c.Examples = []string{"list\nmine"} },
+		"too many examples": func(c *Connector) { c.Examples = []string{"a", "b", "c", "d", "e", "f"} },
 	} {
 		c := sample()
 		mutate(&c)

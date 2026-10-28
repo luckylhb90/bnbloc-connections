@@ -57,14 +57,21 @@
   <div class="sec"><h2>Waiting for you <span class="n">{{.NPending}}</span></h2></div>
   <div class="list">{{range .Systems}}{{if and .Waiting (not .Connected)}}{{template "system" .}}{{end}}{{end}}</div>
 </section>{{end}}
-{{if .NConnected}}<section data-group>
-  <div class="sec"><h2>Connected <span class="n">{{.NConnected}}</span></h2></div>
-  <div class="list">{{range .Systems}}{{if .Connected}}{{template "system" .}}{{end}}{{end}}</div>
-</section>{{end}}
-{{if .NAvailable}}<section data-group>
-  <div class="sec"><h2>Available <span class="n">{{.NAvailable}}</span></h2></div>
-  <div class="list">{{range .Systems}}{{if not (or .Connected .Waiting)}}{{template "system" .}}{{end}}{{end}}</div>
-</section>{{end}}
+{{if and .NInternal .NExternal}}
+<section data-group>
+  <div class="sec"><h2>Company systems <span class="n">{{.NInternal}}</span></h2><span class="subtle">Your organization's own tools</span></div>
+  <div class="list">{{range .Systems}}{{if and .Internal (not (and .Waiting (not .Connected)))}}{{template "system" .}}{{end}}{{end}}</div>
+</section>
+<section data-group>
+  <div class="sec"><h2>External services <span class="n">{{.NExternal}}</span></h2><span class="subtle">Outside services, reached as you</span></div>
+  <div class="list">{{range .Systems}}{{if and (not .Internal) (not (and .Waiting (not .Connected)))}}{{template "system" .}}{{end}}{{end}}</div>
+</section>
+{{else if or .NInternal .NExternal}}
+<section data-group>
+  <div class="sec"><h2>{{if .NInternal}}Company systems <span class="n">{{.NInternal}}</span>{{else}}External services <span class="n">{{.NExternal}}</span>{{end}}</h2></div>
+  <div class="list">{{range .Systems}}{{if not (and .Waiting (not .Connected))}}{{template "system" .}}{{end}}{{end}}</div>
+</section>
+{{end}}
 {{end}}
 
 {{if .Activity}}
@@ -102,6 +109,10 @@
     </div>
   </div>
 
+  {{if and .Examples (not (and .Waiting (not .Connected)))}}<div class="tries">
+        <div class="tries-head">{{if .Connected}}Try asking your agent{{else}}Once connected, ask your agent{{end}}</div>
+        {{range .Examples}}<button type="button" class="try" data-copy="{{.}}" title="Copy, then paste it to your agent"><span>“{{.}}”</span><span class="try-act" aria-hidden="true">Copy</span></button>{{end}}
+      </div>{{end}}
   {{if and .Waiting (not .Connected)}}
   <div class="callout warn">
     <span class="spin" aria-hidden="true"></span>

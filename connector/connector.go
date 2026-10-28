@@ -32,9 +32,16 @@ const (
 
 // Connector is one system.
 type Connector struct {
-	Name        string            `json:"name"`
-	DisplayName string            `json:"displayName"`
-	Purpose     string            `json:"purpose"`
+	Name        string `json:"name"`
+	DisplayName string `json:"displayName"`
+	Purpose     string `json:"purpose"`
+	// Internal: the organization's own system (one its people run or use
+	// for work), not an outside service; the Connections page lists the two
+	// apart.
+	Internal bool `json:"internal,omitempty"`
+	// Examples are things a member may ask their agent to do there, in a
+	// member's words: the Connections page offers them to try.
+	Examples    []string          `json:"examples,omitempty"`
 	Hosts       []string          `json:"hosts"`
 	Connect     Connect           `json:"connect"`
 	Policy      Policy            `json:"policy"`
@@ -316,6 +323,7 @@ const (
 	MaxHosts     = 32
 	MaxGuide     = 32 << 10
 	MaxRules     = 64
+	MaxExamples  = 5
 	maxTextRunes = 200
 )
 
@@ -336,6 +344,14 @@ func (c Connector) Validate() error {
 	}
 	if utf8.RuneCountInString(c.Purpose) > maxTextRunes || strings.ContainsAny(c.Purpose, "\r\n") {
 		return fmt.Errorf("purpose: one line of at most %d characters", maxTextRunes)
+	}
+	if len(c.Examples) > MaxExamples {
+		return fmt.Errorf("examples: at most %d", MaxExamples)
+	}
+	for _, e := range c.Examples {
+		if strings.TrimSpace(e) == "" || utf8.RuneCountInString(e) > maxTextRunes || strings.ContainsAny(e, "\r\n") {
+			return fmt.Errorf("examples: each one line of at most %d characters", maxTextRunes)
+		}
 	}
 	if len(c.Hosts) == 0 || len(c.Hosts) > MaxHosts {
 		return fmt.Errorf("hosts: 1 to %d exact names", MaxHosts)

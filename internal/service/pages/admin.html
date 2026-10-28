@@ -91,6 +91,7 @@
         {{if .C.Purpose}}<div class="item-desc">{{.C.Purpose}}</div>{{end}}
         <div class="meta">
           <span class="chip mono">{{.C.Name}}</span>
+          <span class="chip">{{if .C.Internal}}company system{{else}}external service{{end}}</span>
           <span class="chip">{{template "kind" .C.Connect.Kind}}</span>
           {{range .C.Hosts}}<span class="chip mono">{{.}}</span>{{end}}
           <span class="chip">sends from {{if .C.FromMember}}members' computers{{else}}this service{{end}}</span>
