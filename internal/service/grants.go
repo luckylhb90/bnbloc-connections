@@ -11,6 +11,7 @@ import (
 
 	"github.com/luckylhb90/bnbloc-connections/connector"
 	"github.com/luckylhb90/bnbloc-connections/internal/platform"
+	"github.com/luckylhb90/bnbloc-connections/provider"
 )
 
 // Grant is one member's connection to one connector of one organization,
@@ -34,7 +35,7 @@ type Grant struct {
 	ProviderGrant string            `json:"providerGrant,omitempty"`
 	// Options: the member's choices on a provider connector's options
 	// (connector.ProviderOption), "true" or "false".
-	Options map[string]string `json:"options,omitempty"`
+	Options       map[string]string `json:"options,omitempty"`
 	ConnectedAtMs int64             `json:"connectedAtMs"`
 }
 
@@ -75,6 +76,9 @@ type cachedAuth struct {
 	// key and secret sign each request (connector.Sign); the secret is
 	// never sent.
 	key, secret string
+	// session: the request also carries the principal's session held on
+	// the member's computer (provider.Answer.Session).
+	session bool
 }
 
 func (s *Service) cachedAuthFor(k grantKey) (cachedAuth, bool) {
@@ -128,6 +132,12 @@ var errReconnect = errors.New("the connection no longer works")
 // a time (grantLock), from the grant as stored then (a refresh token
 // another request rotated).
 func (s *Service) credentials(ctx context.Context, c connector.Connector, org string, p principal, g *Grant, force bool) (cachedAuth, error) {
+	return s.credentialsWith(ctx, c, org, p, g, force, nil)
+}
+
+// credentialsWith is credentials made with the answers of a sign-in the
+// member's computer just sent (signedIn; provider connectors only).
+func (s *Service) credentialsWith(ctx context.Context, c connector.Connector, org string, p principal, g *Grant, force bool, signedIn []provider.Step) (cachedAuth, error) {
 	k := grantKey{p.key(), org, c.Name}
 	start := s.now()
 	if !force {
@@ -163,7 +173,7 @@ func (s *Service) credentials(ctx context.Context, c connector.Connector, org st
 	case connector.KindOAuth2:
 		a, err = s.oauthAuth(ctx, c, org, p, g, force)
 	case connector.KindProvider:
-		a, err = s.providerAuth(ctx, c, org, p, g, force)
+		a, err = s.providerAuth(ctx, c, org, p, g, force, signedIn)
 	default:
 		err = fmt.Errorf("unknown connect kind %q", c.Connect.Kind)
 	}

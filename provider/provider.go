@@ -62,6 +62,21 @@ type Call struct {
 	// Options are the member's choices on this connection, every option
 	// the connector declares ("true" or "false"; connector.ProviderOption).
 	Options map[string]string `json:"options,omitempty"`
+	// SignedIn (authorize): the answers to the SignIn steps the provider
+	// asked for, sent from the member's computer with their held session,
+	// in order. The provider answers the request's headers from them.
+	SignedIn []Step `json:"signedIn,omitempty"`
+}
+
+// Step is one sign-in request a member's computer sends with their held
+// session (Answer.SignIn), and its answer (Call.SignedIn): Status,
+// Location and the start of Body.
+type Step struct {
+	Method   string `json:"method"`
+	URL      string `json:"url"`
+	Status   int    `json:"status,omitempty"`
+	Location string `json:"location,omitempty"`
+	Body     []byte `json:"body,omitempty"`
 }
 
 // Principal is who a call signs in as: a member (Kind PrincipalMember, ID
@@ -108,4 +123,13 @@ type Answer struct {
 	// browser to do what Pending asks (a consent page); the connection
 	// completes when the provider later answers Connected.
 	Open string `json:"open,omitempty"`
+	// Session (authorize): the request also carries the member's session
+	// held on their own computer for this connector's host
+	// (docs/prd/2026-10-28-member-held-sessions.md in bnbloc), beside
+	// Header; only on a connector that sends from members' computers.
+	// SignIn: the steps (GET, the connector's host) their computer sends
+	// with that session first, fresh; connections then asks authorize
+	// again with Call.SignedIn.
+	Session bool   `json:"session,omitempty"`
+	SignIn  []Step `json:"signIn,omitempty"`
 }

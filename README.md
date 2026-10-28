@@ -325,6 +325,19 @@ the person types, for up to 15 minutes. Each look asks the provider with
 `connected`, as does the member's agent's next request to that system, so
 nobody presses Connect twice.
 
+A system whose sign-in ends on a host only members' computers reach (a
+connector that sends from them): `/authorize` answers `signIn`, the steps
+(GETs of the connector's host) the member's computer sends first with the
+member's session held there (bnbloc's `EgressSend.Session`, docs in bnbloc:
+docs/prd/2026-10-28-member-held-sessions.md). connections has the bridge
+send them (a fresh session per person or digital worker), then asks
+`/authorize` again with `signedIn` (each step's status, Location and the
+start of its body); the provider answers `session: true` and the headers
+(a CSRF token read from a step). Every request then carries the held
+session, which never leaves the member's computer; a refused one signs in
+again once. A connector sending from the server cannot use a session (an
+administrator's item).
+
 ## What is kept, where
 
 Everything in bnbloc's sealed store (the service's values, sealed with the

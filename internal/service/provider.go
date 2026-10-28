@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -60,10 +61,19 @@ func (s *Service) providerClient() *http.Client {
 }
 
 // providerAuth is what the provider says one request carries.
-func (s *Service) providerAuth(ctx context.Context, c connector.Connector, org string, p principal, g *Grant, force bool) (cachedAuth, error) {
-	a, err := s.callProvider(ctx, c, org, provider.AuthorizePath, provider.Call{Member: p.Member, Principal: p.forProvider(), Org: org, Grant: g.ProviderGrant, Reach: g.Reach, Force: force, Options: g.Options})
+func (s *Service) providerAuth(ctx context.Context, c connector.Connector, org string, p principal, g *Grant, force bool, signedIn []provider.Step) (cachedAuth, error) {
+	a, err := s.callProvider(ctx, c, org, provider.AuthorizePath, provider.Call{Member: p.Member, Principal: p.forProvider(), Org: org, Grant: g.ProviderGrant, Reach: g.Reach, Force: force, Options: g.Options, SignedIn: signedIn})
 	if err != nil {
 		return cachedAuth{}, err
+	}
+	if (a.Session || len(a.SignIn) > 0) && !c.FromMember() {
+		return cachedAuth{}, &providerError{msg: c.DisplayName + "'s sign-in is kept on members' computers: the connector must send from members' computers", admin: true}
+	}
+	if len(a.SignIn) > 0 {
+		if signedIn != nil {
+			return cachedAuth{}, errors.New("the sign-in on your computer did not take")
+		}
+		return cachedAuth{}, &signInNeeded{steps: a.SignIn}
 	}
 	if a.Status == provider.Failed {
 		if a.Reconnect {
@@ -77,7 +87,7 @@ func (s *Service) providerAuth(ctx context.Context, c connector.Connector, org s
 			return cachedAuth{}, err
 		}
 	}
-	out := cachedAuth{header: http.Header{}}
+	out := cachedAuth{header: http.Header{}, session: a.Session}
 	for k, v := range a.Header {
 		out.header.Set(k, v)
 	}
@@ -98,6 +108,15 @@ func (s *Service) providerAuth(ctx context.Context, c connector.Connector, org s
 		out.until = time.UnixMilli(a.ExpiresAtMs - 30_000)
 	}
 	return out, nil
+}
+
+// signInNeeded: the provider asks for a sign-in's steps sent from the
+// member's computer with their held session first
+// (docs/prd/2026-10-28-member-held-sessions.md in bnbloc).
+type signInNeeded struct{ steps []provider.Step }
+
+func (e *signInNeeded) Error() string {
+	return "a sign-in from the member's computer is needed first"
 }
 
 func firstNonEmpty(v ...string) string {

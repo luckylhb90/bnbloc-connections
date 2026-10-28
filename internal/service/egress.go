@@ -15,6 +15,7 @@ import (
 
 	"github.com/luckylhb90/bnbloc-connections/connector"
 	"github.com/luckylhb90/bnbloc-connections/internal/platform"
+	"github.com/luckylhb90/bnbloc-connections/provider"
 	"github.com/luckylhb90/bnbloc/component"
 )
 
@@ -278,7 +279,7 @@ func (s *Service) failed(ctx context.Context, t component.Turn, p principal, c c
 func (s *Service) fromMember(ctx context.Context, t component.Turn, p principal, c connector.Connector, g *Grant, in component.EgressRequest, u *url.URL, class string) (component.EgressResponse, *component.Audit) {
 	target := in.Method + " " + u.Path
 	force := false
-	if r := in.Report; r != nil {
+	if r := in.Report; r != nil && !signInReport(r) {
 		refused := r.Status == http.StatusUnauthorized || c.IsExpired(r.Status, r.Location, r.Body)
 		if !refused {
 			s.record(ctx, t, p, c, in.Method, u.Path, r.Status, class)
@@ -334,11 +335,33 @@ func renewable(c connector.Connector) bool {
 // computer with p's credentials (force: fresh ones), signed here when the
 // connector signs, and the credentials it carries.
 func (s *Service) memberSend(ctx context.Context, c connector.Connector, org string, p principal, g *Grant, in component.EgressRequest, u *url.URL, force bool) (*component.EgressSend, cachedAuth, error) {
-	auth, err := s.credentials(ctx, c, org, p, g, force)
+	var signedIn []provider.Step
+	if in.Report != nil && signInReport(in.Report) {
+		// The sign-in's answers, from the member's computer: the provider
+		// makes the request's credentials from them.
+		for _, st := range in.Report.Steps {
+			signedIn = append(signedIn, provider.Step{Method: http.MethodGet, URL: st.URL, Status: st.Status, Location: st.Location, Body: st.Body})
+		}
+		force = true
+	}
+	auth, err := s.credentialsWith(ctx, c, org, p, g, force, signedIn)
+	var need *signInNeeded
+	if errors.As(err, &need) {
+		// A sign-in on the member's computer first (docs/prd/2026-10-28-member-held-sessions.md
+		// in bnbloc): its steps with the principal's session, made afresh.
+		steps := make([]component.EgressStep, 0, len(need.steps))
+		for _, st := range need.steps {
+			steps = append(steps, component.EgressStep{Method: firstNonEmpty(st.Method, http.MethodGet), URL: st.URL})
+		}
+		return &component.EgressSend{Session: sessionName(p), Steps: steps, StepsOnly: true, EndSession: true}, cachedAuth{}, nil
+	}
 	if err != nil {
 		return nil, cachedAuth{}, err
 	}
 	send := &component.EgressSend{Remove: c.CredentialHeaders(), Header: auth.header, Query: auth.query}
+	if auth.session {
+		send.Session = sessionName(p)
+	}
 	if a := c.Connect.APIKey; a != nil && a.Sign != nil {
 		// Signed here over the exact query and body the bridge sends.
 		var changed bool
@@ -362,6 +385,14 @@ func (s *Service) memberSend(ctx context.Context, c connector.Connector, org str
 	}
 	return send, auth, nil
 }
+
+// signInReport reports the answers of a sign-in's steps only (StepsOnly):
+// the request itself was not sent yet.
+func signInReport(r *component.EgressReport) bool { return r.Status == 0 && len(r.Steps) > 0 }
+
+// sessionName names a principal's session held on the member's computer:
+// a person's and each digital worker's apart.
+func sessionName(p principal) string { return "connections:" + p.key() }
 
 // call makes the request as the member: every credential the agent sent is
 // replaced with the member's; a refusal (401, or the connector's

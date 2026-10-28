@@ -189,7 +189,7 @@ func (s *Service) handleSendEgress(w http.ResponseWriter, r *http.Request, sd co
 		return
 	}
 	force := false
-	if rep := in.Report; rep != nil {
+	if rep := in.Report; rep != nil && !signInReport(rep) {
 		refused := rep.Status == http.StatusUnauthorized || c.IsExpired(rep.Status, rep.Location, rep.Body)
 		if !refused || rep.Attempt >= component.MaxEgressSends {
 			auth, _ := s.credentials(ctx, c, sd.Org, p, &g, false)
