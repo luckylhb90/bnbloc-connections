@@ -51,17 +51,34 @@ func (s *Service) heldFor(ctx context.Context, m component.Member, id string) (*
 
 // decision is what deciding a held change came to: a heading and a line
 // for the person, a sign-in to start (open: the change keeps waiting), the
-// system's answer when the change was made here, and the audit row.
+// system's answer when the change was made here, and the audit row. carryOn
+// is what the person's agent is told for the work the held change interrupted
+// ("" when it is not told: a refusal, a sign-in to finish first).
 type decision struct {
 	heading, text string
 	open          string
 	result        *component.EgressResponse
 	audit         *component.Audit
+	carryOn       string
 }
 
-// decide allows the change (always: changes in that system go without
-// asking from now on) or refuses it.
-func (s *Service) decide(ctx context.Context, m component.Member, hc heldChange, allow, always bool) decision {
+// How far an allow reaches.
+const (
+	allowOnce   = iota // this change
+	allowRoom          // this system's changes in the room, until stopped
+	allowAlways        // this system's changes everywhere (the connection's reach)
+)
+
+// carryOnText is what the agent is told once its held change is allowed: which
+// change, and that it can go on. It names the request, never its body.
+func carryOnText(c connector.Connector, in component.EgressRequest, u *url.URL, how string) string {
+	return clip("The change you asked for ("+in.Method+" "+clip(u.Path, 120)+" in "+c.DisplayName+") is allowed"+how+". Run it again now and go on with what you were doing.", component.MaxCardContinue)
+}
+
+// decide allows the change (how far: this one, the room's, or the system's
+// from now on) or refuses it.
+func (s *Service) decide(ctx context.Context, m component.Member, hc heldChange, allow bool, reach int) decision {
+	always := reach == allowAlways
 	h, c, u, p := hc.h, hc.c, hc.u, hc.p
 	target := c.Name + " " + h.Request.Method + " " + u.Path
 	t := component.Turn{Org: h.Org, Room: h.Room, Job: h.Job, Requester: m.Subject, Drive: firstNonEmpty(h.Drive, component.DriveOwn)}
@@ -95,6 +112,20 @@ func (s *Service) decide(ctx context.Context, m component.Member, hc heldChange,
 	}
 	drop()
 	s.signal(ctx, m.Org, c, h.Request.Method, u.Path, signalAllowed)
+	how := ""
+	if reach == allowRoom {
+		switch {
+		case h.Room == "" || h.Room != m.Room:
+			how = " (this once: the room it was asked in is not this one)"
+		case !mayRoomAllow(component.Turn{Drive: firstNonEmpty(h.Drive, component.DriveOwn)}, p):
+			how = " (this once: a borrowed agent and a digital worker always ask)"
+		default:
+			if err := s.allowRoom(ctx, m.Subject, m.Org, h.Room, c.Name); err != nil {
+				return decision{heading: "Not allowed", text: "Changes in this room could not be allowed right now: " + err.Error()}
+			}
+			how = ", and so is every change in " + c.DisplayName + " in this room until you stop it"
+		}
+	}
 	if always && g.Reach != connector.Write && p.Worker == nil {
 		g.Reach = connector.Write
 		if err := s.saveGrant(ctx, m.Subject, m.Org, g); err != nil {
@@ -108,8 +139,8 @@ func (s *Service) decide(ctx context.Context, m component.Member, hc heldChange,
 			return decision{heading: "Not allowed", text: "The change could not be allowed right now: " + err.Error()}
 		}
 		s.record(ctx, t, p, c, h.Request.Method, u.Path, 0, "allowed")
-		return decision{heading: "Allowed", text: "Ask your agent again: its next try of this change goes through, from your computer (within an hour).",
-			audit: &component.Audit{Action: "change", Target: target, Outcome: "allow", Detail: "sent from the member's computer" + asDetail(p)}}
+		return decision{heading: "Allowed", text: "Its next try of this change goes through, from your computer" + how + ".", carryOn: carryOnText(c, h.Request, u, how),
+			audit: &component.Audit{Action: "change", Target: target, Outcome: "allow", Detail: "sent from the member's computer" + asDetail(p) + roomDetail(reach, how)}}
 	}
 	if h.Request.Streamed {
 		// Held while the connector sent from members' computers: its body
@@ -125,5 +156,14 @@ func (s *Service) decide(ctx context.Context, m component.Member, hc heldChange,
 	}
 	s.record(ctx, t, p, c, h.Request.Method, u.Path, resp.Status, "allowed")
 	return decision{heading: "Done", text: fmt.Sprintf("%s answered %d %s.", c.DisplayName, resp.Status, http.StatusText(resp.Status)), result: &resp,
-		audit: &component.Audit{Action: "change", Target: target, Outcome: "allow", Detail: http.StatusText(resp.Status) + asDetail(p)}}
+		carryOn: clip(fmt.Sprintf("The change you asked for (%s %s in %s) was made by the service: %s answered %d. Do not run it again; go on with what you were doing.", h.Request.Method, clip(u.Path, 120), c.DisplayName, c.DisplayName, resp.Status), component.MaxCardContinue),
+		audit:   &component.Audit{Action: "change", Target: target, Outcome: "allow", Detail: http.StatusText(resp.Status) + asDetail(p) + roomDetail(reach, how)}}
+}
+
+// roomDetail marks an audit row of a change allowed for the room.
+func roomDetail(reach int, how string) string {
+	if reach == allowRoom && strings.Contains(how, "until you stop it") {
+		return ", room allowance"
+	}
+	return ""
 }

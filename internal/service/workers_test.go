@@ -162,3 +162,23 @@ func TestDigitalWorkers(t *testing.T) {
 		t.Fatal("its grant outlived it")
 	}
 }
+
+// A person's room allowance is theirs, for their own agents as themselves: a
+// change that acts as a digital worker (whose credentials are not the person's)
+// still asks, however the room was allowed. (docs/prd/2026-10-28-held-change-
+// continues.md in bnbloc)
+func TestARoomAllowanceDoesNotCoverADigitalWorkersChange(t *testing.T) {
+	fx, _ := workerFixture(t)
+	_ = fx.page(true, http.MethodPost, "/pages/workers/save", url.Values{"id": {"release-bot"}, "displayName": {"Release bot"}, "account": {"+30001"},
+		"owners": {"olga"}, "members": {"maya"}, "drive": {"own"}})
+	_ = fx.page(true, http.MethodPost, "/pages/workers/connect", url.Values{"id": {"release-bot"}, "system": {"issues"}})
+	if err := fx.svc.allowRoom(context.Background(), "maya", "home", "room-1", "issues"); err != nil {
+		t.Fatal(err)
+	}
+	change := component.EgressRequest{Method: "POST", URL: "https://example.com/api/issue", Body: []byte(`{}`)}
+	n := fx.count()
+	out := fx.turnAs("maya", component.DriveOwn, change)
+	if out.Status != http.StatusAccepted || out.Card == nil || fx.count() != n {
+		t.Fatalf("a worker's change under the person's room allowance = %d %+v (sent %d); it must be held", out.Status, out.Card, fx.count()-n)
+	}
+}

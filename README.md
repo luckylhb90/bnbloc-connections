@@ -28,8 +28,16 @@ agent's command ──HTTPS──▶ bridge egress proxy (local CA, claimed host
   Disconnect (revoked at the provider), and the recent calls.
 - **A card in the room** the first time their agent tries a system that is
   not connected (Connect, Ask again), and for every change not allowed in
-  advance (Review → Allow / Don't allow, optionally "without asking from
-  now on"). Only they see it.
+  advance: **Allow** (this change), **Allow in this room** (every change of
+  that system in this room, for their own agents, until they stop it on the
+  room's Connections page), **Don't allow**, and Review (optionally "without
+  asking from now on"). Allowing continues the agent: the component asks the
+  platform to post "go on" as the person to the agent of the job the change
+  was held under (marked automatic), so they do not have to say it. The same
+  request held again is the same change, with the same card. Only they see it.
+  The room allowance never covers a borrowed agent or a digital worker's
+  change, and each change made under it is audited as such (bnbloc's
+  `docs/prd/2026-10-28-held-change-continues.md`).
 
 ## What the agent sees
 
@@ -181,7 +189,8 @@ and reviews the drafts agents post there.
    waiting, and a disconnect drops them. Allowing one on an OAuth sign-in
    that granted reading only signs in again for the write scopes. A change
    sent from the member's computer is allowed once, in its room, for an
-   hour.
+   hour, unless the person allowed the system's changes in the room (their
+   own agents, as themselves, until they stop it).
 5. Every credential the agent sent (`Authorization`, `Cookie`, the key's
    header) is replaced with the person's; a `401` or an `expiredWhen` match
    is retried once with fresh credentials, then answers `403` and a

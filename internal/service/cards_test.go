@@ -34,7 +34,7 @@ func TestCardsActInPlace(t *testing.T) {
 	fx.addConnector(issues())
 	_ = fx.svc.saveGrant(context.Background(), "maya", "home", Grant{Connector: "issues", Reach: connector.Read, APIKey: "k"})
 	out := fx.egressIn("room-1", component.EgressRequest{Method: "POST", URL: "https://example.com/api/issue", Body: []byte(`{"t":1}`)})
-	if len(out.Card.Actions) != 3 || out.Card.Actions[0].Label != "Allow" || out.Card.Actions[2].Kind != component.CardOpen {
+	if len(out.Card.Actions) != 4 || out.Card.Actions[0].Label != "Allow" || out.Card.Actions[1].Label != "Allow in this room" || out.Card.Actions[2].Label != "Don't allow" || out.Card.Actions[3].Kind != component.CardOpen {
 		t.Fatalf("held card = %+v", out.Card)
 	}
 	n := fx.count()
@@ -42,12 +42,12 @@ func TestCardsActInPlace(t *testing.T) {
 	if !r.Done || !strings.Contains(r.Text, "Done") || fx.count() != n+1 || fx.last().method != "POST" {
 		t.Fatalf("allow = %+v (sent %d)", r, fx.count()-n)
 	}
-	if r := fx.card(out.Card.Actions[1]); !r.Done || !strings.Contains(r.Text, "no longer waiting") {
+	if r := fx.card(out.Card.Actions[0]); !r.Done || !strings.Contains(r.Text, "no longer waiting") {
 		t.Fatalf("after it was decided = %+v", r)
 	}
 	out = fx.egressIn("room-1", component.EgressRequest{Method: "POST", URL: "https://example.com/api/issue", Body: []byte(`{"t":2}`)})
 	n = fx.count()
-	if r := fx.card(out.Card.Actions[1]); !r.Done || !strings.Contains(r.Text, "Not made") || fx.count() != n {
+	if r := fx.card(out.Card.Actions[2]); !r.Done || !strings.Contains(r.Text, "Not made") || fx.count() != n {
 		t.Fatalf("deny = %+v", r)
 	}
 

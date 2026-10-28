@@ -93,6 +93,9 @@ func back(w http.ResponseWriter, m component.Member, msg string, isErr bool) {
 	w.WriteHeader(http.StatusSeeOther)
 }
 
+// roomAllowedRow is one system whose changes the person allowed in the room.
+type roomAllowedRow struct{ Name, System, When string }
+
 type systemRow struct {
 	SystemView
 	Kind      string
@@ -167,6 +170,16 @@ func (s *Service) connectionsPage(w http.ResponseWriter, r *http.Request, m comp
 		return
 	case "reach":
 		s.setReach(w, ctx, m, form.Get("system"), form.Get("reach"))
+		return
+	case "stoproom":
+		// The person ends their allowance of a system's changes in this room: the next change asks again.
+		name := form.Get("system")
+		if m.Room == "" || !s.stopRoomAllowance(ctx, m.Subject, m.Org, m.Room, name) {
+			back(w, m, "That allowance is not in effect.", true)
+			return
+		}
+		audit(w, component.Audit{Action: "room-allowance", Target: name, Outcome: "stopped", Detail: "room " + m.Room})
+		back(w, m, "Stopped: each change asks you first again in this room.", false)
 		return
 	case "option":
 		s.setOption(w, ctx, m, form.Get("system"), form.Get("key"), form.Get("value"))
@@ -287,6 +300,15 @@ func (s *Service) connectionsPage(w http.ResponseWriter, r *http.Request, m comp
 		}
 		waiting = append(waiting, row)
 	}
+	var roomAllowed []roomAllowedRow
+	if m.Room != "" {
+		for _, c := range list {
+			var a roomAllowance
+			if ok, _ := s.P.GetJSON(ctx, platform.Member(m.Subject), roomAllowanceKey(m.Org, m.Room, c.Name), &a); ok {
+				roomAllowed = append(roomAllowed, roomAllowedRow{Name: c.Name, System: c.DisplayName, When: time.UnixMilli(a.AtMs).UTC().Format("Jan 2 15:04")})
+			}
+		}
+	}
 	var inRoom []roomIdentityRow
 	if m.Room != "" {
 		all, _ := s.workers(ctx, m.Org)
@@ -311,7 +333,7 @@ func (s *Service) connectionsPage(w http.ResponseWriter, r *http.Request, m comp
 	render(w, http.StatusOK, "connections", map[string]any{
 		"Title": "Connections", "Member": m.Subject, "Admin": m.Admin, "Systems": rows, "Activity": acts, "Waiting": waiting, "Base": m.PageURL,
 		"NConnected": nConnected, "NPending": nPending, "NInternal": nInternal, "NExternal": len(rows) - nPending - nInternal,
-		"Room": m.Room, "RoomOwner": m.RoomRole == component.RoomOwner, "InRoom": inRoom, "MyWorkers": ws,
+		"Room": m.Room, "RoomOwner": m.RoomRole == component.RoomOwner, "InRoom": inRoom, "RoomAllowed": roomAllowed, "MyWorkers": ws,
 		"Msg": q.Get("msg"), "Err": q.Get("err") != "", "Refresh": len(live) > 0, "State": strings.Join(live, " "),
 	})
 }
@@ -529,7 +551,11 @@ func (s *Service) approvePage(w http.ResponseWriter, r *http.Request, m componen
 		render(w, http.StatusOK, "approve", data)
 		return
 	}
-	d := s.decide(ctx, m, *hc, form.Get("decision") == "allow", form.Get("always") == "1")
+	reach := allowOnce
+	if form.Get("always") == "1" {
+		reach = allowAlways
+	}
+	d := s.decide(ctx, m, *hc, form.Get("decision") == "allow", reach)
 	if d.audit != nil {
 		audit(w, *d.audit)
 	}

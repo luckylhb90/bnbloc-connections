@@ -13,7 +13,9 @@ import (
 // /cards/<page>?<query> as the member, for the card's room, and the card
 // shows the reply. Nothing opens but a sign-in the person starts.
 //
-//	approve?id=&decision=allow|deny   decide a held change (decide.go)
+//	approve?id=&decision=allow|room|deny   decide a held change (decide.go);
+//	                                  room: and every change in that system in
+//	                                  this room until stopped
 //	connect?system=                   connect: a sign-in to open, or the
 //	                                  provider's connect (a key is pasted
 //	                                  on the page)
@@ -31,7 +33,11 @@ func (s *Service) handleCard(w http.ResponseWriter, r *http.Request, m component
 			writeJSON(w, http.StatusOK, component.CardReply{Text: "This change is no longer waiting: it was decided, or it expired after a day.", Done: true})
 			return
 		}
-		d := s.decide(ctx, m, *hc, q.Get("decision") == "allow", false)
+		reach := allowOnce
+		if q.Get("decision") == "room" {
+			reach = allowRoom
+		}
+		d := s.decide(ctx, m, *hc, q.Get("decision") != "deny", reach)
 		if d.audit != nil {
 			audit(w, *d.audit)
 		}
@@ -40,9 +46,11 @@ func (s *Service) handleCard(w http.ResponseWriter, r *http.Request, m component
 			if b := bodySummary(d.result.Body); b != "" {
 				text += "\n" + clip(b, 300)
 			}
-			text += "\nAsk your agent to continue: it sees the change."
 		}
-		writeJSON(w, http.StatusOK, component.CardReply{Text: text, Open: d.open, Done: d.open == ""})
+		// The agent's turn ended when the change was held: the decision tells it to go on, so the
+		// person does not have to (docs/prd/2026-10-28-held-change-continues.md in bnbloc).
+		writeJSON(w, http.StatusOK, component.CardReply{Text: text, Open: d.open, Done: d.open == "",
+			Continue: d.carryOn, ContinueJob: hc.h.Job, ContinueKey: hc.h.ID + ":" + q.Get("decision")})
 	case "connect":
 		res := s.connectTo(ctx, m, q.Get("system"), connector.Read, "", nil, false)
 		if res.audit != nil {

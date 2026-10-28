@@ -28,6 +28,24 @@
 </section>
 {{end}}
 
+{{if .RoomAllowed}}
+<section>
+  <div class="sec"><h2>Changes allowed in this room <span class="n">{{len .RoomAllowed}}</span></h2></div>
+  <p class="muted" style="margin:-4px 0 12px">You allowed these systems' changes in this room for your own agents: they are made without asking until you stop it. A borrowed agent and a digital worker still ask.</p>
+  <div class="list">
+  {{range .RoomAllowed}}
+    <div class="card item"><div class="item-top">
+      <div class="item-main">
+        <div class="item-title">{{.System}}</div>
+        <div class="meta"><span class="chip">allowed {{.When}} UTC</span></div>
+      </div>
+      <div class="item-actions"><form method="post" action="{{$.Base}}stoproom"><input type="hidden" name="system" value="{{.Name}}"><button class="sm" data-busy="Stopping…">Stop</button></form></div>
+    </div></div>
+  {{end}}
+  </div>
+</section>
+{{end}}
+
 {{if .Room}}
 <section>
   <div class="sec"><h2>In this room</h2></div>

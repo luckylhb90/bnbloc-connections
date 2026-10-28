@@ -168,7 +168,7 @@ func (s *Service) serve(ctx context.Context, t component.Turn, in component.Egre
 		s.signal(ctx, t.Org, c, in.Method, u.Path, signalRefused)
 		return refusal(http.StatusForbidden, in.Method+" "+u.Path+" is not a request the "+c.DisplayName+" connector allows", nil, nil),
 			&component.Audit{Action: "request", Target: c.Name + " " + target, Outcome: "deny", Detail: "policy"}
-	case class == connector.Write && g.Reach != connector.Write && in.Report == nil && !s.takeAllowance(ctx, t, c, in):
+	case class == connector.Write && g.Reach != connector.Write && in.Report == nil && !s.changeAllowed(ctx, t, p, c, in):
 		id, err := s.hold(ctx, t, p, c, in)
 		if err != nil {
 			return refusal(http.StatusBadGateway, "the change could not be held for "+t.Requester+": "+err.Error(), nil, nil), nil
@@ -178,15 +178,25 @@ func (s *Service) serve(ctx context.Context, t component.Turn, in component.Egre
 				heldCard(c, p, in, u, id), map[string]any{"status": "held", "id": id}),
 			&component.Audit{Action: "request", Target: c.Name + " " + target, Outcome: "queued", Detail: "held" + as}
 	}
+	// A change that goes without a card because the person allowed this system in this room says so
+	// in its audit row (a one-time allowance and the connection's own reach do not).
+	underRoom := ""
+	if class == connector.Write && g.Reach != connector.Write && in.Report == nil && mayRoomAllow(t, p) && s.roomAllows(ctx, t.Requester, t.Org, t.Room, c.Name) {
+		underRoom = ", room allowance"
+	}
 	if c.FromMember() {
-		return s.fromMember(ctx, t, p, c, &g, in, u, class)
+		resp, a := s.fromMember(ctx, t, p, c, &g, in, u, class)
+		if a != nil && underRoom != "" && a.Outcome == "allow" {
+			a.Detail += underRoom
+		}
+		return resp, a
 	}
 	resp, err := s.call(ctx, c, t.Org, p, &g, in, u)
 	if err != nil {
 		return s.failed(ctx, t, p, c, in, u, err)
 	}
 	s.record(ctx, t, p, c, in.Method, u.Path, resp.Status, class)
-	return resp, &component.Audit{Action: "request", Target: c.Name + " " + target, Outcome: "allow", Detail: class + fmt.Sprintf(" %d", resp.Status) + as}
+	return resp, &component.Audit{Action: "request", Target: c.Name + " " + target, Outcome: "allow", Detail: class + fmt.Sprintf(" %d", resp.Status) + as + underRoom}
 }
 
 // streamedRefusal is why a streamed request (its body larger than an
@@ -496,6 +506,7 @@ func heldCard(c connector.Connector, p principal, in component.EgressRequest, u 
 	}
 	return &component.Card{Title: clip("Allow a change in "+c.DisplayName+"?", component.MaxCardTitle), Text: clip(text, component.MaxCardText), Actions: []component.CardAction{
 		callAction("Allow", "approve", url.Values{"id": {id}, "decision": {"allow"}}),
+		callAction("Allow in this room", "approve", url.Values{"id": {id}, "decision": {"room"}}),
 		callAction("Don't allow", "approve", url.Values{"id": {id}, "decision": {"deny"}}),
 		{Kind: component.CardOpen, Label: "Review", Page: "approve", Query: "id=" + url.QueryEscape(id)},
 	}}
